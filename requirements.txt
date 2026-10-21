@@ -1,0 +1,8 @@
+google-api-python-client
+google-genai
+pandas
+requests
+beautifulsoup4
+python-dotenv
+pytest
+streamlit
