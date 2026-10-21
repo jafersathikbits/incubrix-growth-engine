@@ -1,5 +1,5 @@
-# IncuBrix Growth Engine (Assessment Submission)
-**Built for the IncuBrix 2027 Growth Engineer Assessment (Option 1).**
+# IncuBrix Growth Engine
+**Built for the IncuBrix 2027 Growth Engineer Assessment**
 
 An automated, multi-channel lead generation and outreach engine designed to discover creators with a "Shorts Deficit", verify their commercial intent, and draft hyper-personalized outreach using AI.
 
