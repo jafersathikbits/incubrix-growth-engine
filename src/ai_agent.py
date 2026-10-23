@@ -1,61 +1,156 @@
 import json
-import os
-from google import genai
+import logging
+import re
+import time
 from openai import OpenAI
-from src.config import GEMINI_API_KEY, GEMINI_MODEL, GROQ_MODEL, GROQ_API_KEY
+from src.config import GROQ_API_KEYS, GROQ_MODEL, LOGS_DIR
 from dotenv import load_dotenv
 
 load_dotenv()
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-groq_client = OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=GROQ_API_KEY
-) if GROQ_API_KEY else None
+logger = logging.getLogger("incubrix.ai")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    fh = logging.FileHandler(LOGS_DIR / "engine.log", encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s"))
+    logger.addHandler(fh)
+    sh = logging.StreamHandler()
+    sh.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+    logger.addHandler(sh)
+
+_EXHAUSTED_UNTIL = {}
+_ROTATE_POINTER = 0
+
+
+def _get_groq_client():
+    global _ROTATE_POINTER
+    if not GROQ_API_KEYS:
+        return None, None
+    now = time.time()
+    n = len(GROQ_API_KEYS)
+    for offset in range(n):
+        idx = (_ROTATE_POINTER + offset) % n
+        if _EXHAUSTED_UNTIL.get(idx, 0) > now:
+            continue
+        _ROTATE_POINTER = (idx + 1) % n
+        client = OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_API_KEYS[idx],
+            timeout=15.0,
+            max_retries=0,
+        )
+        return client, idx
+    return None, None
+
+
+def _parse_json_response(text: str) -> dict:
+    if not text or not text.strip():
+        raise ValueError("Empty response from model")
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text.strip())
+
+
+def _fallback(recent_video_title, creator_name):
+    logger.warning("Using fallback outreach template (all AI attempts exhausted)")
+    return {
+        "hook": f"Your recent video: {recent_video_title}.",
+        "email": (
+            f"Hi {creator_name},\n\n"
+            f"Came across \"{recent_video_title}\". IncuBrix turns long-form content into "
+            f"shorts, clips and blog drafts automatically, so one video becomes a week of posts.\n\n"
+            f"Would a 15-min demo next week be worth it?\n\n"
+            f"- Jafer Sathik B | IncuBrix Growth Engineer candidate\n"
+            f"Reply STOP to opt out."
+        ),
+        "linkedin": (
+            f"Hi {creator_name}, saw \"{recent_video_title}\". "
+            f"IncuBrix helps creators repurpose long-form into shorts + written posts automatically. "
+            f"Open to a quick chat? Reply STOP to opt out."
+        ),
+        "instagram": (
+            f"Hey {creator_name}, came across \"{recent_video_title}\". "
+            f"IncuBrix is built to help creators clip + repurpose long videos without editing pain. "
+            f"Want a look? Reply STOP to opt out."
+        ),
+    }
+
 
 def generate_personalized_outreach(creator_name, recent_video_title, channel_name):
     prompt = f"""
-    You are an expert growth marketer for IncuBrix (an AI operating system for creators).
-    Target Creator: {creator_name} (YouTube: {channel_name})
-    Recent Video: "{recent_video_title}"
-    
-    Task:
-    1. Write a 1-sentence "personalization hook" mentioning their recent video.
-    2. Write a 50-word Email message pitching IncuBrix based on their need to repurpose this video.
-    3. Write a 30-word LinkedIn DM (more professional).
-    4. Write a 30-word Instagram DM (casual).
-    
-    Rules: 
-    - Address the creator directly. Use the exact provided creator name: "{creator_name}". Do NOT use placeholders like [Name] or [Creator]. If it is a show name, address the team.
-    - Include a mandatory opt-out ("Reply STOP to opt-out") in the email. 
-    - Do not use fake compliments.
-    
-    Return ONLY a valid JSON object with these keys: "hook", "email", "linkedin", "instagram".
-    """
-    
-    if gemini_client:
-        try:
-            response = gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-            text = response.text.replace('```json', '').replace('```', '').strip()
-            return json.loads(text)
-        except Exception:
-            pass 
+    You are an expert growth marketer for IncuBrix (an AI operating system for creators -
+    turns long-form video into shorts, clips, blog drafts, captions, and cross-posting).
 
-    if groq_client:
+    Target creator: {creator_name} (channel: {channel_name})
+    Recent video: "{recent_video_title}"
+
+    Task:
+    1. "hook": one sentence referencing the recent video specifically.
+    2. "email": 60-80 word cold email. Reference the video, name the exact pain IncuBrix removes
+       (editing / repurposing / consistency), one concrete CTA. End with:
+       "Reply STOP to opt out."
+    3. "linkedin": 30-40 word LinkedIn DM, professional tone, same hook. Include opt-out line.
+    4. "instagram": 25-35 word Instagram DM, casual tone. Include opt-out line.
+
+    Rules:
+    - Address the creator by name ("{creator_name}"). No [Name] placeholders.
+    - No made-up facts about them. Only use the video title.
+    - No emojis in email. Emojis allowed in Instagram (max 1).
+    - Return ONLY a valid JSON object with keys: hook, email, linkedin, instagram.
+
+    CRITICAL: Output must be a single valid JSON object. No text before the opening brace. No text after the closing brace. No markdown fences. No explanations. Just the JSON object.
+    """
+
+    attempts = 0
+    max_attempts = max(4, len(GROQ_API_KEYS) * 2)
+
+    while attempts < max_attempts:
+        client, key_idx = _get_groq_client()
+        if client is None:
+            return _fallback(recent_video_title, creator_name)
+
+        attempts += 1
+        t0 = time.time()
         try:
-            response = groq_client.chat.completions.create(
+            resp = client.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7
+                temperature=0.4,
+                response_format={"type": "json_object"},
             )
-            text = response.choices[0].message.content.replace('```json', '').replace('```', '').strip()
-            return json.loads(text)
-        except Exception as e:
-            print(f"     -> Groq failed: {e}")
+            raw = resp.choices[0].message.content
+            data = _parse_json_response(raw)
+            required = {"hook", "email", "linkedin", "instagram"}
+            if not required.issubset(data.keys()):
+                raise ValueError(f"AI response missing keys: {required - set(data.keys())}")
+            logger.info(
+                f"AI OK: key_idx={key_idx} attempts={attempts} duration={time.time()-t0:.2f}s "
+                f"creator='{creator_name}'"
+            )
+            return data
 
-    return {
-        "hook": f"Loved your recent video: {recent_video_title}.",
-        "email": f"Hi {creator_name}, loved your recent video '{recent_video_title}'. IncuBrix helps creators repurpose long-form content into shorts and blogs automatically. Reply STOP to opt-out.",
-        "linkedin": f"Hi {creator_name}, loved your video on {recent_video_title}. IncuBrix can help you repurpose it into more formats.",
-        "instagram": f"Hey {creator_name}! Loved your recent vid. We built a tool at IncuBrix to help you clip and repurpose content easily."
-    }
+        except Exception as e:
+            msg = str(e)
+            dt = time.time() - t0
+
+            if any(code in msg for code in ("429", "401", "403")) or "rate limit" in msg.lower():
+                _EXHAUSTED_UNTIL[key_idx] = time.time() + 60
+                logger.warning(
+                    f"AI key_idx={key_idx} exhausted for 60s (attempt {attempts}, {dt:.2f}s): {msg[:120]}"
+                )
+                continue
+
+            msg_lower = msg.lower()
+            if any(kw in msg_lower for kw in ("expecting value", "json", "empty", "missing keys")):
+                logger.warning(
+                    f"AI JSON issue key_idx={key_idx} attempt {attempts} ({dt:.2f}s): {msg[:120]}. Retrying."
+                )
+                continue
+
+            logger.error(f"AI unexpected error key_idx={key_idx} ({dt:.2f}s): {msg[:200]}")
+            continue
+
+    logger.warning(f"AI all attempts exhausted after {attempts} tries. Using fallback.")
+    return _fallback(recent_video_title, creator_name)

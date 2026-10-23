@@ -1,28 +1,52 @@
-def calculate_score(subscribers, has_email, has_social, video_count, has_money):
+def calculate_score(subscribers, has_email, has_social, video_count, has_money,
+                    pain_signals=None, longform_count=0, short_count=0,
+                    days_since_post=999, has_editor=False):
     score = 0
-    
-    # 1. Audience Size (Max 25) - Goldilocks Zone (10k-100k)
-    if subscribers >= 10000 and subscribers <= 100000: 
-        score += 25
-    elif subscribers > 100000: 
-        score += 10 
-    else: 
-        score += 15 # 5k-10k range
+    pain_signals = pain_signals or []
 
-    # 2. Reachability (Max 30)
-    if has_email: score += 25
-    if has_social: score += 5
-        
-    # 3. Activity (Max 20)
-    if video_count >= 8: score += 20
-    elif video_count >= 4: score += 10
-    
-    # 4. Commercial Intent (Max 25)
-    if has_money: score += 25
-    
-    return score
+    # Pain (max 35)
+    if longform_count >= 3 and short_count == 0:
+        score += 35
+    elif pain_signals:
+        score += 25
+    elif longform_count > 0 and short_count < longform_count:
+        score += 10
+
+    # Capacity gap (max 20)
+    if 10_000 <= subscribers <= 100_000:
+        score += 20
+    elif 5_000 <= subscribers < 10_000:
+        score += 12
+    elif 100_000 < subscribers <= 200_000:
+        score += 10
+    elif subscribers > 200_000:
+        score += 5
+
+    if has_money:
+        score += 25
+
+    if has_email:
+        score += 15
+    elif has_social:
+        score += 5
+
+    if days_since_post <= 7:
+        score += 5
+    elif days_since_post <= 14:
+        score += 3
+
+    # Anti-signal: already has an editor (they don't need IncuBrix as much)
+    if has_editor:
+        score -= 15
+
+    return max(0, min(100, score))
+
 
 def determine_priority(score):
-    if score >= 70: return "A"
-    elif score >= 40: return "B"
-    else: return "C"
+    # A threshold is a HINT; final A cap applied in main.py (250 max).
+    if score >= 85:
+        return "A"
+    elif score >= 60:
+        return "B"
+    else:
+        return "C"

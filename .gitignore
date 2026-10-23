@@ -1,14 +1,7 @@
-# Virtual Environment
-venv/
-env/
-
-# Environment Variables (CRITICAL: Do not push API keys)
 .env
-
-# Python Cache
+.env.local
+.env.local.bak
+data/*.db
+logs/
+venv/
 __pycache__/
-*.pyc
-
-# Database & Logs
-data/leads.db
-logs/*.log

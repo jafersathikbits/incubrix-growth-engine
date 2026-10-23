@@ -1,16 +1,13 @@
 import sqlite3
 import hashlib
-from src.config import DATA_DIR
 
-DB_PATH = DATA_DIR / "leads.db"
-
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+def get_connection(db_path):
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    conn = get_connection()
+def init_db(db_path):
+    conn = get_connection(db_path)
     cursor = conn.cursor()
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS leads (
@@ -50,16 +47,16 @@ def init_db():
 def generate_lead_id(channel_id):
     return hashlib.sha256(channel_id.encode('utf-8')).hexdigest()
 
-def is_duplicate(channel_id):
-    conn = get_connection()
+def is_duplicate(db_path, channel_id):
+    conn = get_connection(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM leads WHERE stable_creator_id = ?", (channel_id,))
     result = cursor.fetchone()
     conn.close()
     return result is not None
 
-def insert_lead(data_dict):
-    conn = get_connection()
+def insert_lead(db_path, data_dict):
+    conn = get_connection(db_path)
     cursor = conn.cursor()
     data_dict['lead_id'] = generate_lead_id(data_dict['stable_creator_id'])
     columns = ', '.join(data_dict.keys())

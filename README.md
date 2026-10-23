@@ -1,87 +1,136 @@
-# IncuBrix Growth Engine
-**Built for the IncuBrix 2027 Growth Engineer Assessment**
+# IncuBrix 2027 — Growth Engineer — Assessment
 
-An automated, multi-channel lead generation and outreach engine designed to discover creators with a "Shorts Deficit", verify their commercial intent, and draft hyper-personalized outreach using AI.
+Finds → verifies → scores → drafts multi-channel outreach for podcasters, YouTube-first
+creators, and expert-led creators in 7 approved English markets. Reruns weekly with
+0% duplicates. Recovers from a single bad API key without stopping.
 
-## The Qualification Engine (How we filter for high-quality leads)
-To ensure 0% waste and maximum ROI, the engine applies 5 strict filters before a lead is saved:
-1. **The Goldilocks Zone:** Rejects anyone under 5k (no budget) or over 100k (has an agency/team) subscribers.
-2. **Activity Check:** Requires 8+ uploads in the last 30 days or 2 long-form videos in 60 days (using zero-quota RSS feeds).
-3. **Language Check:** Scans video titles for Latin characters to ensure English-speaking markets.
-4. **Commercial Intent:** Scans descriptions for monetization signals (Patreon, courses, sponsors, shops).
-5. **Shorts Deficit:** Detects if the creator posts long-form content but zero Shorts, highlighting a massive need for IncuBrix.
+---
 
-## Key Features
-* **Intelligent Discovery:** Finds active creators using the YouTube Data API with batched subscriber checks to save quota.
-* **Multi-LLM Fallback:** Uses Gemini primarily, with automatic failover to Groq (GPT-OSS 120B) to ensure the engine never stops.
-* **0% Duplicates:** Uses SHA-256 hashing in an SQLite database, allowing the engine to resume from crashes without losing progress.
-* **Enterprise UI:** A clean Streamlit dashboard for live execution, dynamic filtering, and a Seed Test (live email delivery).
+## Initial Setup
 
-## Prerequisites
-* Python 3.10+
-* YouTube Data API v3 Key(s)
-* Gemini API Key
-* Groq API Key
-* Gmail App Password (for the Seed Test feature)
-
-## Installation & Setup
-
-1. **Clone the repository:**
-```bash
-git clone <your-repo-link>
-cd incubrix-growth-engine
-```
-
-2. **Set up a virtual environment:**
-```bash
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# Mac/Linux:
-source venv/bin/activate
-```
-
-3. **Install dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **Environment Variables:**
-Rename `.env.example` to `.env` and fill in your keys:
-```env
-YT_KEY_1=your_youtube_api_key
-GEMINI_API_KEY=your_gemini_key
-GEMINI_MODEL=gemini-1.5-flash-latest
-GROQ_API_KEY=your_groq_key
-GROQ_MODEL=openai/gpt-oss-120b
-SMTP_EMAIL=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-```
+Create `.env` from `.env.example` and fill in:
+`YOUTUBE_API_KEYS`, `GROQ_API_KEY`, `SMTP_*`, `SENDER_NAME`, `SENDER_TITLE`.
 
-## The "One Clear Run Command"
+---
 
-### Option A: Run the Enterprise UI (Recommended)
-To run the full visual dashboard, live Seed Test, and generate leads:
-```bash
-streamlit run app.py
-```
+## Run Command (one command)
 
-### Option B: Run the CLI (Headless)
-To run the engine directly from the terminal and save to `data/leads.csv`:
 ```bash
 python main.py
 ```
 
-## Running Tests
-To run the unit tests for the deduplication and enrichment logic:
+Runs the engine end-to-end. Outputs:
+
+- `data/production.db` — SQLite source of truth
+- `data/production_leads.csv` — full qualified list (UTF-8)
+- `data/production_priority_a.csv` — Priority A only
+- `outreach/priority_a/<lead_id>.md` — 3 channels × 3 messages per Priority A lead
+- `logs/engine.log` — runtime log
+
+### Optional UI
+
 ```bash
-pytest tests/
+streamlit run app.py
 ```
 
-## Architecture
-* `app.py`: Streamlit UI and Seed Test sender.
-* `main.py`: Core orchestration loop.
-* `src/youtube_api.py`: API batching, RSS parsing, key rotation.
-* `src/enrichment.py`: Email/contact regex, Commercial intent NLP.
-* `src/database.py`: SQLite deduplication and state management.
-* `src/ai_agent.py`: Gemini/Groq prompt engineering.
+Opens at `http://localhost:8501` for visual browsing (used in the product walkthrough video).
+
+### Resume / Refresh
+
+```bash
+python -m src.resume_main
+```
+
+Appends new leads to the existing DB (no duplicates), regenerates Priority A packs, re-exports CSV.
+
+### Tests
+
+```bash
+pytest -q
+```
+
+### Seed test (3-channel proof)
+
+```bash
+python -m src.seed_test --send --all
+python -m src.seed_test --report
+```
+
+Uses test accounts from `.env` only. LinkedIn and Instagram messages are queued for manual send (platform rules forbid bulk automation).
+
+---
+
+## Runtime & cost (at 6,000 leads)
+
+| Step | Time | Cost |
+|---|---|---|
+| YouTube search + channels.list | 30–45 min | ₹0 (free quota) |
+| YouTube RSS fetches | 60–90 min | ₹0 |
+| Groq LLM (Priority A ≈ 250) | 3–5 min | ~$0.10 |
+| **Total** | **~2–3 hrs** | **< $0.20** |
+
+---
+
+## Failure recovery (demoable)
+
+Every API call is wrapped. On a bad YouTube key (403/429), the engine rotates to the next key,
+logs the rotation, and retries. On a Groq failure, it marks the key exhausted for 60s, rotates,
+and falls back to a safe template if all keys fail — the pipeline never crashes.
+
+**To prove it:** set `YT_KEY_1=bad_key` in `.env`, keep `YT_KEY_2=real_key`, run `python main.py`.
+
+---
+
+## Tools used (disclosure)
+
+- **YouTube Data API v3** — channel search, stats (multi-key rotation)
+- **YouTube public RSS feeds** — recent videos per channel
+- **Groq API** — Llama-3.1-8b for personalised outreach drafts
+- **Python:** `google-api-python-client`, `requests`, `pandas`, `openai`, `python-dotenv`, `streamlit`
+- **SQLite** — local dedupe + resume
+- **SMTP** — test email send
+
+**AI usage:** GPT-based AI assisted code and message templates. Personalised message content is generated live by Groq from each lead's real recent video title. Every lead's evidence URL is stored in `production.db` and `production_leads.csv`.
+
+---
+
+## Compliance
+
+- Public data only (channel title, description, subscriber count, public videos).
+- Contact info comes only from the creator's own public channel description — never guessed.
+- Every message includes sender identity + "Reply STOP to opt out."
+- No automated messages sent on LinkedIn/Instagram. Human send only.
+- India DPDP, GDPR, CAN-SPAM: legitimate-interest B2B outreach + opt-out + public-contact-only sourcing.
+
+---
+
+## Repository layout
+
+```
+.
+├── main.py                     # entry point
+├── app.py                      # optional Streamlit UI
+├── README.md
+├── PRODUCT_INSIGHTS.md
+├── requirements.txt
+├── .env.example
+├── outreach/                   # segment sequences + generated per-lead packs
+├── src/
+│   ├── config.py
+│   ├── youtube_api.py
+│   ├── enrichment.py
+│   ├── scoring.py
+│   ├── ai_agent.py
+│   ├── outreach_gen.py
+│   ├── database.py
+│   ├── exporter.py
+│   ├── email_sender.py
+│   ├── seed_test.py
+│   └── resume_main.py
+└── tests/
+    └── test_engine.py
+```
