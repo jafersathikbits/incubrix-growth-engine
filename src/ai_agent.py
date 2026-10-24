@@ -21,7 +21,6 @@ if not logger.handlers:
 _EXHAUSTED_UNTIL = {}
 _ROTATE_POINTER = 0
 
-
 def _get_groq_client():
     global _ROTATE_POINTER
     if not GROQ_API_KEYS:
@@ -40,8 +39,9 @@ def _get_groq_client():
             max_retries=0,
         )
         return client, idx
+    
+    # All keys are currently in timeout
     return None, None
-
 
 def _parse_json_response(text: str) -> dict:
     if not text or not text.strip():
@@ -52,9 +52,8 @@ def _parse_json_response(text: str) -> dict:
         text = re.sub(r"\s*```$", "", text)
     return json.loads(text.strip())
 
-
 def _fallback(recent_video_title, creator_name):
-    logger.warning("Using fallback outreach template (all AI attempts exhausted)")
+    logger.warning("Using fallback outreach template (all AI keys exhausted/rate limited)")
     return {
         "hook": f"Your recent video: {recent_video_title}.",
         "email": (
@@ -76,7 +75,6 @@ def _fallback(recent_video_title, creator_name):
             f"Want a look? Reply STOP to opt out."
         ),
     }
-
 
 def generate_personalized_outreach(creator_name, recent_video_title, channel_name):
     prompt = f"""
@@ -108,6 +106,8 @@ def generate_personalized_outreach(creator_name, recent_video_title, channel_nam
 
     while attempts < max_attempts:
         client, key_idx = _get_groq_client()
+        
+        # If client is None, all keys are in a 60s timeout. Use fallback immediately.
         if client is None:
             return _fallback(recent_video_title, creator_name)
 
@@ -136,9 +136,10 @@ def generate_personalized_outreach(creator_name, recent_video_title, channel_nam
             dt = time.time() - t0
 
             if any(code in msg for code in ("429", "401", "403")) or "rate limit" in msg.lower():
+                # 60-second timeout for this specific API key
                 _EXHAUSTED_UNTIL[key_idx] = time.time() + 60
                 logger.warning(
-                    f"AI key_idx={key_idx} exhausted for 60s (attempt {attempts}, {dt:.2f}s): {msg[:120]}"
+                    f"AI key_idx={key_idx} exhausted for 60s. Switching to fallback templates."
                 )
                 continue
 

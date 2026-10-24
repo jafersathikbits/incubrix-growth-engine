@@ -1,6 +1,6 @@
 def calculate_score(subscribers, has_email, has_social, video_count, has_money,
                     pain_signals=None, longform_count=0, short_count=0,
-                    days_since_post=999, has_editor=False):
+                    days_since_post=999, has_editor=False, engagement_ratio=0.0):
     score = 0
     pain_signals = pain_signals or []
 
@@ -13,7 +13,9 @@ def calculate_score(subscribers, has_email, has_social, video_count, has_money,
         score += 10
 
     # Capacity gap (max 20)
-    if 10_000 <= subscribers <= 100_000:
+    if subscribers == 0:
+        score += 5
+    elif 10_000 <= subscribers <= 100_000:
         score += 20
     elif 5_000 <= subscribers < 10_000:
         score += 12
@@ -35,16 +37,22 @@ def calculate_score(subscribers, has_email, has_social, video_count, has_money,
     elif days_since_post <= 14:
         score += 3
 
-    # Anti-signal: already has an editor (they don't need IncuBrix as much)
     if has_editor:
         score -= 15
+
+    # Engagement Tie-breaker (max 5 points)
+    if engagement_ratio > 0.05:
+        score += 5
+    elif engagement_ratio > 0.02:
+        score += 3
+    elif engagement_ratio > 0.01:
+        score += 1
 
     return max(0, min(100, score))
 
 
 def determine_priority(score):
-    # A threshold is a HINT; final A cap applied in main.py (250 max).
-    if score >= 85:
+    if score >= 80:
         return "A"
     elif score >= 60:
         return "B"

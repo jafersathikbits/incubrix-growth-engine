@@ -1,8 +1,8 @@
 {
-  "query_idx": 4,
-  "country_idx": 0,
-  "page_token": "CKwCEAA",
-  "leads_processed": 29,
-  "a_count": 15,
-  "saved_at": "2026-10-23T13:21:38.989471+00:00"
+  "query_idx": 98,
+  "country_idx": 2,
+  "queue": [],
+  "leads_processed": 3738,
+  "a_count": 200,
+  "saved_at": "2026-10-24T15:06:59.407378+00:00"
 }

@@ -4,575 +4,720 @@ import json
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+import requests
+import hashlib
+import xml.etree.ElementTree as ET
+from collections import deque
+from datetime import datetime, timezone, timedelta
 
 from src.database import init_db, is_duplicate, insert_lead
 from src.youtube_api import YouTubeClient
-from src.enrichment import (
-    find_email_from_description,
-    extract_socials_from_text,
-    check_commercial_and_need,
-)
+from src.enrichment import find_email_from_description, extract_socials_from_text, check_commercial_and_need
 from src.ai_agent import generate_personalized_outreach
 from src.outreach_gen import generate_priority_a_pack
 from src.scoring import calculate_score, determine_priority
-from src.config import SEARCH_QUERIES, TARGET_COUNTRIES, DATA_DIR, LOGS_DIR
+from src.config import SEARCH_QUERIES, TARGET_COUNTRIES, DATA_DIR, LOGS_DIR, EXCLUDE_KEYWORDS
 from src.exporter import export_to_csv
 
-
 APPROVED_COUNTRIES = {"US", "CA", "GB", "IE", "AU", "NZ", "SG"}
-PRIORITY_A_CAP = 250
 COUNTRY_CAP_RATIO = 0.55
-COUNTRY_MIN_BOOTSTRAP = 30
-MIN_COUNTRIES = 3
+NICHE_RE = re.compile(r"podcast|coach|mentor|course|consult|newsletter|creator|business|expert|tutorial", re.I)
 
 NON_APPROVED_LANGUAGE_MARKERS = (
     "kannada", "hindi", "tamil", "telugu", "malayalam", "marathi", "gujarati",
     "punjabi", "bhojpuri", "odia", "assamese", "nepali", "urdu", "bangla",
     "bengali", "sinhala", "pashto", "mandarin", "cantonese", "tagalog",
     "bahasa", "swahili", "yoruba", "hausa", "amharic", "zulu",
-    "español", "deutsch", "français", "italiano", "português", "nederlands",
-    "polski",
+    "español", "deutsch", "français", "italiano", "português", "nederlands", "polski",
 )
 
 PUBLICATION_NAMES = (
-    "wall street journal", "wsj", "bloomberg", "reuters", "financial times",
-    "the economist", "forbes", "business insider", "cnbc", "cnn",
-    "bbc news", "the new york times", "new york times", "washington post",
-    "the washington post", "the guardian", "the telegraph", "financial review",
-    "australian financial review", "afr", "pushkin industries", "pushkin",
-    "the times", "the sunday times",
+    "wall street journal", "wsj", "bloomberg", "reuters", "financial times", "the economist", 
+    "forbes", "business insider", "cnbc", "cnn", "bbc news", "the new york times", 
+    "new york times", "washington post", "the washington post", "the guardian", 
+    "the telegraph", "financial review", "australian financial review", "afr", 
+    "pushkin industries", "pushkin", "the times", "the sunday times", "anderson cooper", "stuff you missed"
 )
 
 PUBLICATION_EMAIL_DOMAINS = (
-    "@wsj.com", "@bloomberg.net", "@reuters.com", "@ft.com",
-    "@economist.com", "@forbes.com", "@businessinsider.com",
-    "@cnbc.com", "@cnn.com", "@nytimes.com", "@washingtonpost.com",
-    "@theguardian.com", "@telegraph.co.uk", "@afr.com",
-    "@smh.com.au", "@pushkin.fm", "@npr.org", "@bbc.co.uk",
+    "@wsj.com", "@bloomberg.net", "@reuters.com", "@ft.com", "@economist.com", "@forbes.com", 
+    "@businessinsider.com", "@cnbc.com", "@cnn.com", "@nytimes.com", "@washingtonpost.com",
+    "@theguardian.com", "@telegraph.co.uk", "@afr.com", "@smh.com.au", "@pushkin.fm", 
+    "@npr.org", "@bbc.co.uk", "@howstuffworks.com"
 )
 
 STATE_FILE = DATA_DIR / "engine_state.json"
-RUNTIME_LOG = LOGS_DIR / "runtime.jsonl"
+PODCAST_STATE_FILE = DATA_DIR / "podcast_state.json"
 
+def _extract_email_from_xml(xml_text):
+    try:
+        root = ET.fromstring(xml_text)
+        for elem in root.iter():
+            if elem.tag.endswith('email') and elem.text:
+                emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', elem.text)
+                if emails: return emails[0]
+    except Exception:
+        pass
+    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', xml_text)
+    valid = [e for e in emails if not e.endswith(('.png', '.jpg', '.webp', '.gif'))]
+    return valid[0] if valid else None
 
-# ==================================================================
-# Country balance
-# ==================================================================
+def _classify_youtube_segment(title, desc):
+    blob = (title + " " + desc).lower()
+    if any(w in blob for w in ["coach", "consult", "expert", "course", "masterclass", "mentor", "training"]):
+        return "Expert-led"
+    if "podcast" in blob or "episode" in blob:
+        return "Podcaster"
+    return "YouTube-first"
+
+def _get_rss_stats_and_segment(xml_text, name):
+    count_30d = 0
+    latest_date = "Unknown"
+    text_lower = xml_text.lower()
+    name_lower = name.lower()
+    
+    try:
+        root = ET.fromstring(xml_text)
+        now = datetime.now(timezone.utc)
+        for item in root.findall('.//item'):
+            pubDate = item.find('pubDate')
+            if pubDate is not None and pubDate.text:
+                try:
+                    dt = datetime.strptime(pubDate.text[:25], "%a, %d %b %Y %H:%M:%S").replace(tzinfo=timezone.utc)
+                    if latest_date == "Unknown": latest_date = dt.isoformat()
+                    if (now - dt).days <= 30: count_30d += 1
+                except: pass
+        for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
+            pub = entry.find('{http://www.w3.org/2005/Atom}published')
+            if pub is not None and pub.text:
+                try:
+                    dt = datetime.fromisoformat(pub.text.replace("Z", "+00:00"))
+                    if latest_date == "Unknown": latest_date = dt.isoformat()
+                    if (now - dt).days <= 30: count_30d += 1
+                except: pass
+    except Exception:
+        pass
+    
+    if count_30d == 0: count_30d = 0 
+
+    expert_words = ("coach", "consult", "expert", "mentor", "teacher", "academy", "course", "mastermind", "training")
+    if any(w in name_lower for w in expert_words) or "course" in text_lower or "masterclass" in text_lower:
+        segment = "Expert-led"
+        monetization = "course"
+    elif "podcast" in name_lower or "episode" in text_lower:
+        segment = "Podcaster"
+        monetization = "sponsor"
+    else:
+        segment = "YouTube-first"
+        monetization = "sponsor"
+
+    return count_30d, latest_date, segment, monetization
+
+def run_podcast_scraper(db_path, queries, segment_filter, limit=5000, english_only=True, filter_commercial=True):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE primary_platform='Podcast'")
+    existing_podcasts = cursor.fetchone()[0]
+    
+    if existing_podcasts >= limit:
+        print(f"[SCRAPER] Already have {existing_podcasts} podcast leads. Skipping.")
+        conn.close()
+        return
+
+    print(f"[SCRAPER] Starting iTunes scrape using your queries. Target: {limit} (Current: {existing_podcasts})")
+    leads_found = existing_podcasts
+    seen_emails = set()
+
+    terms_to_search = queries if queries else SEARCH_QUERIES
+    
+    if segment_filter == "Expert-led" and not queries:
+        terms_to_search = ["coaching", "consulting", "business coach", "masterclass", "mentor"]
+
+    itunes_countries = ["us", "gb", "ca", "au", "ie", "nz", "sg"]
+    
+    state = _load_podcast_state()
+    searched_combos = set(state.get("searched", []))
+
+    for term in terms_to_search:
+        if leads_found >= limit: break
+        for itunes_cc in itunes_countries:
+            if leads_found >= limit: break
+            
+            combo = f"{term}_{itunes_cc}"
+            if combo in searched_combos:
+                continue
+                
+            print(f"  -> Searching iTunes ({itunes_cc.upper()}) for: {term}")
+            url = f"https://itunes.apple.com/search?term={term}&country={itunes_cc}&limit=200&entity=podcast"
+            
+            try:
+                resp = requests.get(url, timeout=10).json()
+                for result in resp.get("results", []):
+                    if leads_found >= limit: break
+                    
+                    feed_url = result.get("feedUrl")
+                    if not feed_url: continue
+                    
+                    try:
+                        rss_resp = requests.get(feed_url, timeout=5)
+                        xml_text = rss_resp.text
+                        
+                        email = _extract_email_from_xml(xml_text)
+                        if email and email.lower() not in seen_emails:
+                            name = result.get("collectionName", "Unknown Podcast")
+                            
+                            name_lower = name.lower()
+                            if any(kw in name_lower for kw in EXCLUDE_KEYWORDS):
+                                continue
+
+                            if is_publication(name, email):
+                                continue
+
+                            count_30d, latest_date, segment, mon_signal = _get_rss_stats_and_segment(xml_text, name)
+                            
+                            if segment_filter != "All" and segment != segment_filter:
+                                continue
+                                
+                            if english_only:
+                                text_lower = xml_text.lower()
+                                if any(lang in text_lower for lang in NON_APPROVED_LANGUAGE_MARKERS):
+                                    continue
+                                
+                            commercial = {"has_money": True, "monetization_signal": "sponsor", "pain_signals": []}
+                            if filter_commercial:
+                                commercial = check_commercial_and_need(xml_text, count_30d, 0)
+                                if not commercial["has_money"]:
+                                    continue
+                                mon_signal = commercial["monetization_signal"]
+
+                            seen_emails.add(email.lower())
+                            stable_id = hashlib.sha256(feed_url.encode('utf-8')).hexdigest()
+                            
+                            score = calculate_score(
+                                subscribers=0, has_email=True, has_social=False, video_count=count_30d, 
+                                has_money=commercial["has_money"], 
+                                pain_signals=commercial.get("pain_signals", []), 
+                                longform_count=count_30d, short_count=0, days_since_post=7, has_editor=False
+                            )
+                            
+                            priority = determine_priority(score)
+
+                            if count_30d > 4:
+                                need = f"High: {count_30d} recent episodes, needs repurposing."
+                                first_msg = f"Hi {name}, noticed you have {count_30d} recent episodes. IncuBrix turns long audio into shorts and captions automatically. Reply STOP to opt out."
+                            else:
+                                need = "Medium: Long-form backlog, needs clips."
+                                first_msg = f"Hi {name}, came across your podcast. IncuBrix turns long episodes into shorts and captions. Reply STOP to opt out."
+
+                            lead_data = {
+                                "lead_id": stable_id, "stable_creator_id": stable_id,
+                                "creator_name": name, "country_iso2": itunes_cc.upper(), "primary_platform": "Podcast",
+                                "profile_url": result.get("collectionViewUrl", ""),
+                                "followers_or_subscribers": 0, "last_content_date": latest_date,
+                                "recent_content_url": feed_url, "content_count_30d": count_30d, "longform_count_60d": count_30d * 2,
+                                "monetization_signal": mon_signal, "monetization_evidence_url": feed_url,
+                                "incubrix_need": need, "need_evidence_url": feed_url,
+                                "best_channel": "Email", "channel_handle_or_url": email, "channel_evidence_url": feed_url,
+                                "backup_channel": "", "personalization_hook": f"Your podcast {name} caught my attention.",
+                                "first_message": first_msg,
+                                "checked_date": time.strftime("%Y-%m-%d"), "priority": priority, "lead_score": score,
+                                "candidate_status": "Qualified", "rejection_reason": "",
+                                "duplicate_check": "UNIQUE", "completeness_check": "COMPLETE"
+                            }
+                            cols = ', '.join(lead_data.keys())
+                            placeholders = ', '.join(['?'] * len(lead_data))
+                            cursor.execute(f"INSERT OR IGNORE INTO leads ({cols}) VALUES ({placeholders})", tuple(lead_data.values()))
+                            leads_found += 1
+                            
+                            print(f"     -> SAVED: {name[:40]} ({leads_found}/{limit})")
+                            
+                    except Exception: pass
+            except Exception as e: print(f"  Error on {term} ({itunes_cc}): {e}")
+            time.sleep(0.2)
+            
+            searched_combos.add(combo)
+            _save_podcast_state({"searched": list(searched_combos)})
+            
+        conn.commit()
+
+    conn.close()
+    print(f"[SCRAPER] Done. Total podcast leads in DB: {leads_found}")
+
 def _country_distribution(db_path):
-    if not os.path.exists(db_path):
-        return {}
+    if not os.path.exists(db_path): return {}
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT country_iso2, COUNT(*) FROM leads "
-            "WHERE candidate_status='Qualified' "
-            "GROUP BY country_iso2"
-        ).fetchall()
+        rows = conn.execute("SELECT country_iso2, COUNT(*) FROM leads WHERE candidate_status='Qualified' GROUP BY country_iso2").fetchall()
         return {r[0]: r[1] for r in rows if r[0]}
-    except sqlite3.OperationalError:
-        return {}
-    finally:
-        conn.close()
-
+    except: return {}
+    finally: conn.close()
 
 def _country_allowed(country, dist, total):
-    """Brief rule: ≤60% per country, ≥3 countries. Cap kicks in after 30-lead bootstrap."""
-    if total < COUNTRY_MIN_BOOTSTRAP:
-        return True
-    new_total = total + 1
+    if total < 30: return True
     current = dist.get(country, 0)
-    return (current + 1) / new_total <= COUNTRY_CAP_RATIO
+    return (current + 1) / (total + 1) <= COUNTRY_CAP_RATIO
 
-
-def _country_balance_report(db_path):
-    dist = _country_distribution(db_path)
-    total = sum(dist.values())
-    if total == 0:
-        return
-    print("\n" + "=" * 60)
-    print(f"  COUNTRY BALANCE ({total} leads)")
-    print("=" * 60)
-    for country, count in sorted(dist.items(), key=lambda x: -x[1]):
-        pct = 100 * count / total
-        flag = "  OVER 60% CAP" if pct > 60 else ""
-        print(f"  {country}: {count:5d}  ({pct:5.1f}%){flag}")
-    print("=" * 60)
-    if len(dist) < MIN_COUNTRIES:
-        print(f"  WARNING: Only {len(dist)} countries — brief requires ≥{MIN_COUNTRIES}")
-    over = [c for c, n in dist.items() if 100 * n / total > 60]
-    if over:
-        print(f"  WARNING: Exceeds 60% cap: {over}")
-
-
-# ==================================================================
-# Runtime logging
-# ==================================================================
-def _log_runtime(limit, leads_processed, a_count, duration_sec, mode):
-    record = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "mode": mode,
-        "limit": limit,
-        "leads_processed": leads_processed,
-        "priority_a": a_count,
-        "duration_sec": round(duration_sec, 1),
-        "duration_min": round(duration_sec / 60, 1),
-        # Cost estimate (Groq free-tier pricing is ~$0.05-0.10 per 1k small calls)
-        "approx_ai_calls": a_count,
-        "approx_ai_cost_usd": round(a_count * 0.0004, 2),
-        # YouTube quota used is tracked in logs/engine.log (count search() calls × 100)
-    }
-    try:
-        with open(RUNTIME_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-    except Exception:
-        pass
-
-
-# ==================================================================
-# State save/restore
-# ==================================================================
 def _load_state():
     if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
+        try: return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except: return {}
     return {}
 
-
-def _save_state(query_idx, country_idx, page_token, leads_processed, a_count):
+def _save_state(query_idx, country_idx, queue, leads_processed, a_count):
     try:
         STATE_FILE.write_text(json.dumps({
-            "query_idx": query_idx,
-            "country_idx": country_idx,
-            "page_token": page_token,
-            "leads_processed": leads_processed,
-            "a_count": a_count,
+            "query_idx": query_idx, "country_idx": country_idx, 
+            "queue": list(queue)[:5000],
+            "leads_processed": leads_processed, "a_count": a_count,
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except: pass
 
+def _load_podcast_state():
+    if PODCAST_STATE_FILE.exists():
+        try: return json.loads(PODCAST_STATE_FILE.read_text(encoding="utf-8"))
+        except: return {"searched": []}
+    return {"searched": []}
 
-# ==================================================================
-# Qualification helpers
-# ==================================================================
+def _save_podcast_state(state):
+    try:
+        PODCAST_STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except: pass
+
 def _contains_non_latin_script(text):
-    if not text:
-        return False
+    if not text: return False
     for char in text:
         code = ord(char)
-        if code < 0x0250:
-            continue
-        if 0x2000 <= code <= 0x206F:
-            continue
-        if 0x2190 <= code <= 0x27BF:
-            continue
-        if 0x1F000 <= code <= 0x1FAFF:
+        if code < 0x0250 or (0x2000 <= code <= 0x206F) or (0x2190 <= code <= 0x27BF) or (0x1F000 <= code <= 0x1FAFF):
             continue
         return True
     return False
 
-
 def _is_mostly_english(videos):
-    if not videos:
-        return False
-    non_latin = sum(1 for v in videos[:5]
-                    if _contains_non_latin_script(v.get("title", "")))
+    if not videos: return False
+    non_latin = sum(1 for v in videos[:5] if _contains_non_latin_script(v.get("title", "")))
     return non_latin < 2
 
-
 def verify_language(creator_name, videos):
-    parts = [creator_name or ""]
-    for v in (videos or [])[:10]:
-        parts.append(v.get("title", "") or "")
-    blob = " ".join(parts).lower()
+    blob = (creator_name or "").lower() + " " + " ".join(v.get("title", "").lower() for v in (videos or [])[:10])
     for lang in NON_APPROVED_LANGUAGE_MARKERS:
         if re.search(r"\b" + re.escape(lang) + r"\b", blob):
             return False, f"language:{lang}"
     return True, "ok"
 
-
 def is_publication(creator_name, email):
     name_lower = f" {(creator_name or '').lower().strip()} "
     for pub in PUBLICATION_NAMES:
-        if f" {pub} " in name_lower:
-            return True
+        if f" {pub} " in name_lower: return True
     if email:
-        email_lower = email.lower()
         for dom in PUBLICATION_EMAIL_DOMAINS:
-            if email_lower.endswith(dom):
-                return True
+            if email.lower().endswith(dom): return True
     return False
 
-
 def _find_evidence_video(videos, keyword):
-    if not keyword or keyword == "None":
-        return videos[0] if videos else None
+    if not keyword or keyword == "None": return videos[0] if videos else None
     kw_lower = keyword.lower()
     for v in videos:
-        if kw_lower in (v.get("description") or "").lower():
-            return v
+        if kw_lower in (v.get("description") or "").lower(): return v
     return videos[0] if videos else None
 
-
 def _count_priority_a(db_path):
-    if not os.path.exists(db_path):
-        return 0
+    if not os.path.exists(db_path): return 0
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM leads WHERE priority='A' AND candidate_status='Qualified'"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM leads WHERE priority='A' AND candidate_status='Qualified'").fetchone()
         return row[0] if row else 0
-    except sqlite3.OperationalError:
-        return 0
-    finally:
-        conn.close()
-
+    except: return 0
+    finally: conn.close()
 
 def _count_existing(db_path):
-    if not os.path.exists(db_path):
-        return 0
+    if not os.path.exists(db_path): return 0
     conn = sqlite3.connect(db_path)
-    try:
-        return conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
-    except sqlite3.OperationalError:
-        return 0
-    finally:
-        conn.close()
-
+    try: return conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+    except: return 0
+    finally: conn.close()
 
 def _template_ai_data(recent_title, creator_name):
     return {
         "hook": f"Your recent video: {recent_title}.",
-        "email": (
-            f"Hi {creator_name}, came across your recent video \"{recent_title}\". "
-            f"IncuBrix turns long-form content into shorts + captions + written posts in one pass. "
-            f"Worth a quick look? Reply STOP to opt out."
-        ),
-        "linkedin": (
-            f"Hi {creator_name}, saw your video on \"{recent_title}\". "
-            f"IncuBrix helps creators repurpose long-form automatically. Open to a quick chat? "
-            f"Reply STOP to opt out."
-        ),
-        "instagram": (
-            f"Hey {creator_name}, saw \"{recent_title}\". "
-            f"IncuBrix clips + repurposes long videos automatically. Want a look? "
-            f"Reply STOP to opt out."
-        ),
+        "email": f"Hi {creator_name}, came across your recent video \"{recent_title}\". IncuBrix turns long-form content into shorts + captions + written posts in one pass. Worth a quick look? Reply STOP to opt out.",
+        "linkedin": f"Hi {creator_name}, saw your video on \"{recent_title}\". IncuBrix helps creators repurpose long-form automatically. Open to a quick chat? Reply STOP to opt out.",
+        "instagram": f"Hey {creator_name}, saw \"{recent_title}\". IncuBrix clips + repurposes long videos automatically. Want a look? Reply STOP to opt out."
     }
 
+def rebalance_priorities(db_path):
+    """Picks the top 5% of ACTUAL leads per platform based on score."""
+    if not os.path.exists(db_path): return
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # 1. Reset all A's to B
+    cursor.execute("UPDATE leads SET priority = 'B' WHERE priority = 'A'")
+    
+    # 2. Get distinct platforms
+    platforms = cursor.execute("SELECT DISTINCT primary_platform FROM leads WHERE candidate_status='Qualified'").fetchall()
+    
+    total_a = 0
+    for (plat,) in platforms:
+        # Count actual qualified leads for this platform
+        count = cursor.execute("SELECT COUNT(*) FROM leads WHERE primary_platform = ? AND candidate_status='Qualified'", (plat,)).fetchone()[0]
+        
+        # Calculate 5% of actual leads (using round to prevent off-by-one errors)
+        cap = max(5, round(count * 0.05))
+        
+        # Upgrade the top N highest scoring leads for this specific platform
+        query = """
+            UPDATE leads
+            SET priority = 'A'
+            WHERE lead_id IN (
+                SELECT lead_id FROM leads
+                WHERE candidate_status = 'Qualified' AND primary_platform = ?
+                ORDER BY lead_score DESC
+                LIMIT ?
+            )
+        """
+        cursor.execute(query, (plat, cap))
+        print(f"[REBALANCE] Upgraded top {cap} {plat} leads to Priority A (out of {count} total).")
+        total_a += cap
+        
+    conn.commit()
+    conn.close()
+    print(f"[REBALANCE] Total Priority A leads set to {total_a} (5% of actual leads per platform).")
 
-# ==================================================================
-# Engine
-# ==================================================================
+def generate_all_priority_a_outreach(db_path):
+    if not os.path.exists(db_path): return
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        leads = conn.execute("SELECT * FROM leads WHERE candidate_status='Qualified' AND priority='A'").fetchall()
+        if not leads:
+            print("\n[OUTREACH] No Priority A leads found to generate outreach for.")
+            return
+        
+        print(f"\n[OUTREACH] Generating multi-channel packs for {len(leads)} Priority A leads (this may take a few minutes)...")
+        for lead in leads:
+            lead_dict = dict(lead)
+            try:
+                time.sleep(2) 
+                generate_priority_a_pack(lead_dict)
+            except Exception as e:
+                print(f"  [WARN] Pack failed for {lead_dict.get('creator_name')}: {e}")
+        print("[OUTREACH] Done generating packs.")
+    finally:
+        conn.close()
+
 def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                min_subs=5000, max_subs=100000, min_vids_30d=8, min_vids_60d=2,
                english_only=True, generate_outreach=True, sleep_between=0.2,
-               resume_mode=False):
+               resume_mode=False, source_filter="All", segment_filter="All"):
     init_db(db_path)
-    yt = YouTubeClient()
+    
+    podcast_limit = limit // 2 if source_filter == "All" else limit
+
+    if source_filter in ["All", "Podcast"]:
+        run_podcast_scraper(
+            db_path, 
+            custom_queries, 
+            segment_filter, 
+            podcast_limit, 
+            english_only=english_only, 
+            filter_commercial=filter_commercial
+        )
+
+    if source_filter == "Podcast":
+        print("[ENGINE] Podcast only selected. Skipping YouTube crawl.")
+        if generate_outreach:
+            rebalance_priorities(db_path)
+            generate_all_priority_a_outreach(db_path)
+        return
+
+    try:
+        yt = YouTubeClient()
+    except RuntimeError as e:
+        if "NO_YOUTUBE_KEYS" in str(e):
+            print("[ENGINE] No YouTube API keys found. Skipping YouTube crawl.")
+            if generate_outreach:
+                rebalance_priorities(db_path)
+                generate_all_priority_a_outreach(db_path)
+            return
+        raise e
 
     leads_processed = _count_existing(db_path)
-    a_count = _count_priority_a(db_path)
+    
+    if leads_processed >= limit:
+        print(f"Already reached target of {limit} leads. Skipping YouTube crawl.")
+        if generate_outreach:
+            rebalance_priorities(db_path)
+            generate_all_priority_a_outreach(db_path)
+        return
+
     base_queries = list(custom_queries) if custom_queries else list(SEARCH_QUERIES)
     countries = list(TARGET_COUNTRIES.keys())
+    
+    rejected_cids = set() 
 
     if resume_mode:
         state = _load_state()
         query_idx = state.get("query_idx", 0)
         country_idx = state.get("country_idx", 0)
-        page_token_start = state.get("page_token")
-        if query_idx or country_idx or page_token_start:
-            print(f"[RESUME] From query_idx={query_idx}, country_idx={country_idx}, "
-                  f"page_token={'set' if page_token_start else 'none'}")
-        else:
-            print("[RESUME] No saved state — starting from beginning")
+        frontier = deque(state.get("queue", []))
+        print(f"[RESUME YOUTUBE] From query_idx={query_idx}, queue_size={len(frontier)}")
     else:
         query_idx = 0
         country_idx = 0
-        page_token_start = None
+        frontier = deque()
 
-    print(f"Starting engine. Existing leads: {leads_processed} | "
-          f"Priority A so far: {a_count}/{PRIORITY_A_CAP} | Target: {limit}")
-
+    print(f"Starting YouTube engine. Total leads so far: {leads_processed} | Target: {limit}")
     start_ts = time.time()
-    first_iteration = True
 
     try:
         while leads_processed < limit:
-            if query_idx >= len(base_queries):
-                base_queries.append(f"{base_queries[query_idx % len(base_queries)]} tips")
-
-            query = base_queries[query_idx]
-            country_code = countries[country_idx % len(countries)]
-            print(f"\n[SEARCH] '{query}' in {country_code}...")
-
-            page_token = page_token_start if first_iteration else None
-            first_iteration = False
-
-            while True:
-                if leads_processed >= limit:
-                    print(f"Reached limit of {limit} leads.")
-                    return
-
-                _save_state(query_idx, country_idx, page_token, leads_processed, a_count)
-
-                channels, next_page_token = yt.search_channels(query, country_code, page_token)
-                if not channels:
+            if not frontier:
+                if query_idx >= len(base_queries) * len(countries):
+                    print("\n[ENGINE] Exhausted all YouTube search combinations. Stopping YouTube crawl.")
                     break
+                
+                query = base_queries[query_idx % len(base_queries)]
+                country_code = countries[country_idx % len(countries)]
+                print(f"\n[SEED] Searching YouTube '{query}' in {country_code}...")
+                
+                try:
+                    seeds = yt.search_seeds(query, country_code)
+                except RuntimeError as e:
+                    if "QUOTA_EXHAUSTED" in str(e):
+                        print("\n[ENGINE] YOUTUBE API QUOTA EXHAUSTED. Stopping YouTube crawl to save partial data.")
+                        break
+                    raise e
+                
+                for s in seeds:
+                    if not is_duplicate(db_path, s) and s not in rejected_cids:
+                        frontier.append(s)
+                
+                query_idx += 1
+                if query_idx % len(base_queries) == 0:
+                    country_idx += 1
+                _save_state(query_idx, country_idx, frontier, leads_processed, 0)
+                continue
 
-                channel_ids = [ch["channel_id"] for ch in channels]
-                stats_batch = yt.get_multiple_channel_stats(channel_ids)
-                countries_batch = yt.get_channel_countries(channel_ids)
+            batch = []
+            while frontier and len(batch) < 50:
+                cid = frontier.popleft()
+                if not is_duplicate(db_path, cid) and cid not in rejected_cids:
+                    batch.append(cid)
 
-                candidates = []
-                for channel in channels:
-                    cid = channel["channel_id"]
-                    sub = stats_batch.get(cid, 0)
-                    rc = countries_batch.get(cid)
-                    if is_duplicate(db_path, cid):
-                        continue
-                    if sub < min_subs or sub > max_subs:
-                        continue
-                    if not rc or rc not in APPROVED_COUNTRIES:
-                        continue
-                    candidates.append({**channel, "sub_count": sub, "country": rc})
+            if not batch: continue
 
-                for c in candidates:
-                    c["videos"] = yt.get_latest_videos_rss(c["channel_id"])
-                candidates = [c for c in candidates if c["videos"]]
+            print(f"\n[BATCH] Checking {len(batch)} channels from queue...")
+            channels_data = yt.get_batch_channel_details(batch)
 
-                all_vids = []
-                for c in candidates:
-                    all_vids.extend(v["video_id"] for v in c["videos"])
-                durations = yt.get_video_durations(all_vids) if all_vids else {}
-                for c in candidates:
-                    for v in c["videos"]:
-                        v["duration"] = durations.get(v["video_id"]) or 0
+            for c in channels_data:
+                cid = c["id"]
+                snippet = c.get("snippet", {})
+                stats = c.get("statistics", {})
+                branding = c.get("brandingSettings", {}).get("channel", {})
+                
+                title = snippet.get("title", "Unknown")
+                sub = int(stats.get("subscriberCount", 0))
+                rc = snippet.get("country")
+                desc = snippet.get("description", "")
+                
+                featured = branding.get("featuredChannelsUrls", [])
+                for f in featured:
+                    if not is_duplicate(db_path, f) and f not in rejected_cids:
+                        frontier.append(f)
 
-                for c in candidates:
-                    if leads_processed >= limit:
-                        return
+                title_lower = title.lower()
+                if any(kw in title_lower for kw in EXCLUDE_KEYWORDS):
+                    rejected_cids.add(cid)
+                    continue
 
-                    cid = c["channel_id"]
-                    title = c["title"]
-                    videos = c["videos"]
-                    print(f"  -> Checking: {title} ({c['sub_count']:,} subs)")
+                if not rc or rc not in APPROVED_COUNTRIES: 
+                    rejected_cids.add(cid)
+                    continue
+                
+                dist = _country_distribution(db_path)
+                total_q = sum(dist.values())
+                if not _country_allowed(rc, dist, total_q): 
+                    rejected_cids.add(cid)
+                    continue
+                if sub < min_subs or sub > max_subs: 
+                    rejected_cids.add(cid)
+                    continue
+                if not NICHE_RE.search(desc + " " + title): 
+                    rejected_cids.add(cid)
+                    continue
+                
+                if segment_filter != "All" and _classify_youtube_segment(title, desc) != segment_filter:
+                    rejected_cids.add(cid)
+                    continue
+                
+                email = find_email_from_description(desc)
+                if is_publication(title, email): 
+                    rejected_cids.add(cid)
+                    continue
 
-                    if english_only and not _is_mostly_english(videos):
-                        print(f"     -> Rejected: non-English (script)")
-                        continue
+                print(f"  -> Extracting: {title} ({sub:,} subs)")
+                
+                videos = yt.get_latest_videos_rss(cid)
+                if not videos: 
+                    rejected_cids.add(cid)
+                    continue
+                if english_only and not _is_mostly_english(videos): 
+                    rejected_cids.add(cid)
+                    continue
+                
+                lang_ok, _ = verify_language(title, videos)
+                if not lang_ok: 
+                    rejected_cids.add(cid)
+                    continue
+                
+                vids_to_check = [v["video_id"] for v in videos]
+                vid_stats = yt.get_video_stats_and_durations(vids_to_check)
+                
+                total_views = 0
+                total_likes = 0
+                total_comments = 0
+                
+                for v in videos:
+                    vid_id = v["video_id"]
+                    s = vid_stats.get(vid_id, {})
+                    v["duration"] = s.get("duration", 0)
+                    v["views"] = s.get("views", 0)
+                    v["likes"] = s.get("likes", 0)
+                    v["comments"] = s.get("comments", 0)
+                    
+                    total_views += v["views"]
+                    total_likes += v["likes"]
+                    total_comments += v["comments"]
 
-                    lang_ok, lang_reason = verify_language(title, videos)
-                    if not lang_ok:
-                        print(f"     -> Rejected: {lang_reason}")
-                        continue
+                engagement_ratio = 0.0
+                if total_views > 0:
+                    engagement_ratio = (total_likes + total_comments) / total_views
 
-                    all_desc = " ".join((v.get("description") or "") for v in videos)
-                    email = find_email_from_description(all_desc)
-                    socials = extract_socials_from_text(all_desc)
+                activity = yt.check_channel_activity(sub, videos, min_subs, max_subs, min_vids_30d, min_vids_60d)
+                if activity.get("status") == "Rejected": 
+                    rejected_cids.add(cid)
+                    continue
 
-                    if is_publication(title, email):
-                        print(f"     -> Rejected: publication/brand")
-                        continue
+                recent_video = videos[0]
+                
+                all_desc = desc + " " + " ".join(v.get("description", "") for v in videos)
+                socials = extract_socials_from_text(all_desc)
+                if not email: email = find_email_from_description(all_desc)
+                
+                if email: best_channel, handle = "Email", email
+                elif socials["linkedin"]: best_channel, handle = "LinkedIn", socials["linkedin"]
+                elif socials["instagram"]: best_channel, handle = "Instagram", socials["instagram"]
+                else: 
+                    rejected_cids.add(cid)
+                    continue
+                
+                commercial = check_commercial_and_need(all_desc, activity["longform_count"], activity["short_count"])
+                if filter_commercial and not commercial["has_money"]: 
+                    rejected_cids.add(cid)
+                    continue
+                if not commercial["has_real_need"]: 
+                    rejected_cids.add(cid)
+                    continue
 
-                    if email:
-                        best_channel, handle = "Email", email
-                    elif socials["linkedin"]:
-                        best_channel, handle = "LinkedIn", socials["linkedin"]
-                    elif socials["instagram"]:
-                        best_channel, handle = "Instagram", socials["instagram"]
-                    else:
-                        print(f"     -> Rejected: no contact info")
-                        continue
+                days_since = 999
+                try:
+                    pub = datetime.fromisoformat(recent_video["published_at"].replace("Z", "+00:00"))
+                    days_since = (datetime.now(timezone.utc) - pub).days
+                except: pass
 
-                    # ---- COUNTRY CAP (brief: ≤60% per country, ≥3 countries) ----
-                    dist = _country_distribution(db_path)
-                    total_q = sum(dist.values())
-                    if not _country_allowed(c["country"], dist, total_q):
-                        print(f"     -> Rejected: country cap ({c['country']} at "
-                              f"{dist.get(c['country'], 0)}/{total_q})")
-                        continue
+                score = calculate_score(
+                    subscribers=sub, has_email=bool(email), has_social=bool(socials["linkedin"] or socials["instagram"]),
+                    video_count=activity["count_30d"], has_money=commercial["has_money"],
+                    pain_signals=commercial.get("pain_signals", []),
+                    longform_count=activity["longform_count"], short_count=activity["short_count"],
+                    days_since_post=days_since, has_editor=commercial.get("has_editor", False),
+                    engagement_ratio=engagement_ratio
+                )
 
-                    activity = yt.check_channel_activity(
-                        cid, c["sub_count"], videos,
-                        min_subs=min_subs, max_subs=max_subs,
-                        min_vids_30d=min_vids_30d, min_vids_60d=min_vids_60d,
-                    )
-                    if activity.get("status") == "Rejected":
-                        print(f"     -> Rejected: {activity.get('reason')}")
-                        continue
+                priority = determine_priority(score)
 
-                    recent_video = videos[0]
-                    commercial = check_commercial_and_need(
-                        all_desc, activity["longform_count"], activity["short_count"],
-                    )
-                    if filter_commercial and not commercial["has_money"]:
-                        print(f"     -> Rejected: no commercial signal")
-                        continue
-                    if not commercial["has_real_need"]:
-                        print(f"     -> Rejected: no real need ({commercial['incubrix_need']})")
-                        continue
+                backup = None
+                if best_channel != "Email" and email: backup = "Email"
+                elif best_channel != "LinkedIn" and socials["linkedin"]: backup = "LinkedIn"
+                elif best_channel != "Instagram" and socials["instagram"]: backup = "Instagram"
 
-                    days_since = 999
-                    try:
-                        pub = datetime.fromisoformat(recent_video["published_at"].replace("Z", "+00:00"))
-                        days_since = (datetime.now(timezone.utc) - pub).days
-                    except Exception:
-                        pass
+                mon_vid = _find_evidence_video(videos, commercial["monetization_signal"])
+                mon_url = f"https://youtube.com/watch?v={mon_vid['video_id']}" if mon_vid else ""
+                need_url = f"https://youtube.com/watch?v={recent_video['video_id']}"
 
-                    score = calculate_score(
-                        subscribers=activity["subscribers"],
-                        has_email=bool(email),
-                        has_social=bool(socials["linkedin"] or socials["instagram"]),
-                        video_count=activity["count_30d"],
-                        has_money=commercial["has_money"],
-                        pain_signals=commercial.get("pain_signals", []),
-                        longform_count=activity["longform_count"],
-                        short_count=activity["short_count"],
-                        days_since_post=days_since,
-                        has_editor=commercial.get("has_editor", False),
-                    )
+                if priority == "A":
+                    print(f"     -> AI outreach (score={score}, priority=A)...")
+                    ai_data = generate_personalized_outreach(creator_name=title, recent_video_title=recent_video["title"], channel_name=title)
+                else:
+                    ai_data = _template_ai_data(recent_video["title"], title)
 
-                    priority = determine_priority(score)
-                    if priority == "A":
-                        if a_count >= PRIORITY_A_CAP:
-                            priority = "B"
-                        else:
-                            a_count += 1
+                def _clean(s): return (s or "").replace("[Name]", title).replace("[Creator]", title)
 
-                    backup = None
-                    if best_channel != "Email" and email:
-                        backup = "Email"
-                    elif best_channel != "LinkedIn" and socials["linkedin"]:
-                        backup = "LinkedIn"
-                    elif best_channel != "Instagram" and socials["instagram"]:
-                        backup = "Instagram"
+                lead_data = {
+                    "stable_creator_id": cid, "creator_name": title, "country_iso2": rc,
+                    "primary_platform": "YouTube", "profile_url": f"https://youtube.com/channel/{cid}",
+                    "followers_or_subscribers": sub, "last_content_date": recent_video["published_at"],
+                    "recent_content_url": f"https://youtube.com/watch?v={recent_video['video_id']}",
+                    "content_count_30d": activity["count_30d"], "longform_count_60d": activity["longform_count"],
+                    "monetization_signal": commercial["monetization_signal"], "monetization_evidence_url": mon_url,
+                    "incubrix_need": commercial["incubrix_need"], "need_evidence_url": need_url,
+                    "best_channel": best_channel, "channel_handle_or_url": handle,
+                    "channel_evidence_url": f"https://youtube.com/channel/{cid}/about", "backup_channel": backup,
+                    "personalization_hook": _clean(ai_data.get("hook")),
+                    "first_message": _clean(ai_data.get("email") if best_channel == "Email" else ai_data.get("linkedin") if best_channel == "LinkedIn" else ai_data.get("instagram")),
+                    "checked_date": time.strftime("%Y-%m-%d"), "priority": priority,
+                    "lead_score": score, "candidate_status": "Qualified",
+                    "duplicate_check": "UNIQUE", "completeness_check": "COMPLETE",
+                }
 
-                    mon_vid = _find_evidence_video(videos, commercial["monetization_signal"])
-                    mon_url = f"https://youtube.com/watch?v={mon_vid['video_id']}" if mon_vid else ""
-                    need_url = f"https://youtube.com/watch?v={recent_video['video_id']}"
+                insert_lead(db_path, lead_data)
+                leads_processed += 1
+                print(f"     -> SAVED {title} ({leads_processed}/{limit}) [{rc}] score={score} pri={priority} | engagement={engagement_ratio:.2%}")
 
-                    if priority == "A":
-                        print(f"     -> AI outreach (score={score}, priority=A)...")
-                        ai_data = generate_personalized_outreach(
-                            creator_name=title,
-                            recent_video_title=recent_video["title"],
-                            channel_name=title,
-                        )
-                    else:
-                        ai_data = _template_ai_data(recent_video["title"], title)
+                lead_data["recent_video_title"] = recent_video["title"]
+                if generate_outreach and priority == "A":
+                    try: generate_priority_a_pack(lead_data, ai_data=ai_data)
+                    except Exception as e: print(f"     -> [WARN] Pack failed: {e}")
 
-                    def _clean(s):
-                        return (s or "").replace("[Name]", title).replace("[Creator]", title)
-
-                    lead_data = {
-                        "stable_creator_id": cid,
-                        "creator_name": title,
-                        "country_iso2": c["country"],
-                        "primary_platform": "YouTube",
-                        "profile_url": f"https://youtube.com/channel/{cid}",
-                        "followers_or_subscribers": activity["subscribers"],
-                        "last_content_date": recent_video["published_at"],
-                        "recent_content_url": f"https://youtube.com/watch?v={recent_video['video_id']}",
-                        "content_count_30d": activity["count_30d"],
-                        "longform_count_60d": activity["longform_count"],
-                        "monetization_signal": commercial["monetization_signal"],
-                        "monetization_evidence_url": mon_url,
-                        "incubrix_need": commercial["incubrix_need"],
-                        "need_evidence_url": need_url,
-                        "best_channel": best_channel,
-                        "channel_handle_or_url": handle,
-                        "channel_evidence_url": f"https://youtube.com/channel/{cid}/about",
-                        "backup_channel": backup,
-                        "personalization_hook": _clean(ai_data.get("hook")),
-                        "first_message": _clean(
-                            ai_data.get("email") if best_channel == "Email"
-                            else ai_data.get("linkedin") if best_channel == "LinkedIn"
-                            else ai_data.get("instagram")
-                        ),
-                        "checked_date": time.strftime("%Y-%m-%d"),
-                        "priority": priority,
-                        "lead_score": score,
-                        "candidate_status": "Qualified",
-                        "duplicate_check": "UNIQUE",
-                        "completeness_check": "COMPLETE",
-                    }
-
-                    insert_lead(db_path, lead_data)
-                    leads_processed += 1
-                    print(f"     -> SAVED {title} ({leads_processed}/{limit}) "
-                          f"[{c['country']}] score={score} pri={priority}")
-
-                    lead_data["recent_video_title"] = recent_video["title"]
-                    if generate_outreach and priority == "A":
-                        try:
-                            generate_priority_a_pack(lead_data, ai_data=ai_data)
-                        except Exception as e:
-                            print(f"     -> [WARN] Pack failed: {e}")
-
-                    if sleep_between > 0:
-                        time.sleep(sleep_between)
-
-                _save_state(query_idx, country_idx, next_page_token, leads_processed, a_count)
-
-                if not next_page_token:
-                    break
-                page_token = next_page_token
-
-            query_idx += 1
-            if query_idx % len(base_queries) == 0:
-                country_idx += 1
-            _save_state(query_idx, country_idx, None, leads_processed, a_count)
+                if sleep_between > 0: time.sleep(sleep_between)
+                _save_state(query_idx, country_idx, frontier, leads_processed, 0)
 
     finally:
         duration = time.time() - start_ts
-        _log_runtime(limit, leads_processed, a_count, duration,
-                     mode="resume" if resume_mode else "fresh")
-        _country_balance_report(db_path)
+        print(f"\nRun complete. Total leads in DB: {leads_processed}. Duration: {duration/60:.1f} mins.")
+        _save_state(query_idx, country_idx, frontier, leads_processed, 0)
 
+    if generate_outreach:
+        rebalance_priorities(db_path)
+        generate_all_priority_a_outreach(db_path)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="IncuBrix Production Engine")
-    parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--limit", type=int, default=1000)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fresh", action="store_true", help="Delete existing DB and start over")
+    parser.add_argument("--limit", type=int, default=6000)
     parser.add_argument("--no-outreach", action="store_true")
+    parser.add_argument("--source", choices=["All", "YouTube", "Podcast"], default="All")
+    parser.add_argument("--segment", choices=["All", "Expert-led", "Podcaster", "YouTube-first"], default="All")
     args = parser.parse_args()
 
     db_path = str(DATA_DIR / "production.db")
     full_csv = str(DATA_DIR / "production_leads.csv")
     priority_csv = str(DATA_DIR / "production_priority_a.csv")
 
-    if not args.resume:
-        if os.path.exists(db_path):
-            print("Fresh start. Deleting old production database...")
-            os.remove(db_path)
-        if STATE_FILE.exists():
-            STATE_FILE.unlink()
+    if args.fresh and os.path.exists(db_path):
+        print("Fresh start. Deleting DB...")
+        os.remove(db_path)
+        if STATE_FILE.exists(): STATE_FILE.unlink()
+        if PODCAST_STATE_FILE.exists(): PODCAST_STATE_FILE.unlink()
 
     try:
-        run_engine(db_path, limit=args.limit,
-                   generate_outreach=not args.no_outreach,
-                   resume_mode=args.resume)
+        run_engine(db_path, limit=args.limit, generate_outreach=not args.no_outreach, 
+                   resume_mode=not args.fresh, source_filter=args.source, segment_filter=args.segment)
     except KeyboardInterrupt:
-        print("\n[STOPPED] Ctrl+C. Saving progress...")
-    except RuntimeError as e:
-        if "QUOTA_EXHAUSTED" in str(e):
-            print("\n" + "=" * 60)
-            print("  ALL 12 API QUOTAS EXHAUSTED FOR TODAY")
-            print("=" * 60)
-            print("  This is normal — 10,000 units/day per project × 12 projects.")
-            print("  Your progress is saved. Come back tomorrow and run:")
-            print("      python main.py --resume")
-            print("=" * 60)
-        else:
-            print(f"\n[NOTICE] Engine stopped early: {e}")
+        print("\n[STOPPED] Saving state...")
     except Exception as e:
-        print(f"\n[NOTICE] Engine stopped early: {e}")
+        print(f"\n[NOTICE] Engine stopped: {e}")
     finally:
         print("\nExporting to CSV...")
         export_to_csv(db_path, full_csv, priority_csv)
-        print("Export complete. Resume with: python main.py --resume")

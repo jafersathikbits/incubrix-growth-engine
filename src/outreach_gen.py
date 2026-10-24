@@ -77,7 +77,6 @@ _TITLE_PREFIXES = {"mr", "mr.", "mrs", "mrs.", "ms", "ms.", "dr", "dr.", "prof",
 
 
 def _first_name(name):
-    """Only returns a first name from a known list; else 'there'. Never a brand."""
     if not name:
         return "there"
     import re

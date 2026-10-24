@@ -54,7 +54,8 @@ def main():
         # Import here so `main.py` argparse block only runs when needed
         from main import run_engine
         try:
-            run_engine(db_path=db_path, limit=args.limit)
+            # FIX: Pass resume_mode=True
+            run_engine(db_path=db_path, limit=args.limit, resume_mode=True)
         except Exception as e:
             print(f"\n[NOTICE] Engine paused: {e}")
 

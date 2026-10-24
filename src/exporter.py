@@ -1,7 +1,6 @@
 import pandas as pd
 import sqlite3
 
-
 def _derive_segment(creator_name, monetization_signal, incubrix_need):
     blob = f"{creator_name or ''} {monetization_signal or ''} {incubrix_need or ''}".lower()
     expert_words = ("coach", "consult", "expert", "mentor", "teacher",
@@ -12,9 +11,9 @@ def _derive_segment(creator_name, monetization_signal, incubrix_need):
         return "Podcaster"
     return "YouTube-first"
 
-
 def export_to_csv(db_path, full_csv_path, priority_csv_path):
     conn = sqlite3.connect(db_path)
+    # Sorts by lead_score DESC. If tied, sorts by content_count_30d DESC (favors active podcasts/creators)
     query = """
     SELECT 
         lead_id, creator_name, country_iso2, primary_platform, profile_url,
@@ -27,7 +26,7 @@ def export_to_csv(db_path, full_csv_path, priority_csv_path):
         rejection_reason, duplicate_check, completeness_check
     FROM leads
     WHERE candidate_status = 'Qualified'
-    ORDER BY lead_score DESC
+    ORDER BY lead_score DESC, content_count_30d DESC
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
