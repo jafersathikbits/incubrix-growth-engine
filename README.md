@@ -1,8 +1,6 @@
 # IncuBrix 2027 — Growth Engineer — Assessment
 
-Finds → verifies → scores → drafts multi-channel outreach for podcasters, YouTube-first
-creators, and expert-led creators in 7 approved English markets. Reruns weekly with
-0% duplicates. Recovers from a single bad API key without stopping.
+Finds → verifies → scores → drafts multi-channel outreach for podcasters, YouTube-first creators, and expert-led creators in 7 approved English markets. Reruns weekly with 0% duplicates. Recovers from a single bad API key without stopping.
 
 ---
 
@@ -13,7 +11,7 @@ pip install -r requirements.txt
 ```
 
 Create `.env` from `.env.example` and fill in:
-`YOUTUBE_API_KEYS`, `GROQ_API_KEY`, `SMTP_*`, `SENDER_NAME`, `SENDER_TITLE`.
+`YOUTUBE_API_KEYS`, `GROQ_API_KEYS`, `SMTP_*`, `SENDER_NAME`, `SENDER_TITLE`.
 
 ---
 
@@ -37,7 +35,7 @@ Runs the engine end-to-end. Outputs:
 streamlit run app.py
 ```
 
-Opens at `http://localhost:8501` for visual browsing (used in the product walkthrough video).
+Opens at `http://localhost:8501` for visual browsing.
 
 ### Resume / Refresh
 
@@ -66,20 +64,20 @@ Uses test accounts from `.env` only. LinkedIn and Instagram messages are queued 
 
 ## Runtime & cost (at 6,000 leads)
 
-| Step | Time | Cost |
-|---|---|---|
-| YouTube search + channels.list | 30–45 min | ₹0 (free quota) |
-| YouTube RSS fetches | 60–90 min | ₹0 |
-| Groq LLM (Priority A ≈ 250) | 3–5 min | ~$0.10 |
-| **Total** | **~2–3 hrs** | **< $0.20** |
+| Step | Time | Cost (Free Test) | Cost (Production) |
+|---|---|---|---|
+| YouTube search + channels.list | 30–45 min | ₹0 (free quota) | ~₹0 (requires quota extension) |
+| YouTube RSS fetches | 60–90 min | ₹0 | ₹0 |
+| Groq LLM (Priority A ≈ 250) | 3–5 min | ~$0.10 (~₹8) | ~$2.00 (~₹166) |
+| **Total** | **~2–3 hrs** | **< $0.20 (< ₹16)** | **~$2.00 (~₹166)** |
+
+*Note: The free API tiers are only suitable for local testing. Production requires a paid Groq tier to bypass rate limits, and a dedicated email sending tool (e.g., Instantly.ai) to prevent spam filtering.*
 
 ---
 
 ## Failure recovery (demoable)
 
-Every API call is wrapped. On a bad YouTube key (403/429), the engine rotates to the next key,
-logs the rotation, and retries. On a Groq failure, it marks the key exhausted for 60s, rotates,
-and falls back to a safe template if all keys fail — the pipeline never crashes.
+Every API call is wrapped. On a bad YouTube key (403/429), the engine rotates to the next key, logs the rotation, and retries. On a Groq failure, it marks the key exhausted for 60s, rotates, and falls back to a safe template if all keys fail — the pipeline never crashes.
 
 **To prove it:** set `YT_KEY_1=bad_key` in `.env`, keep `YT_KEY_2=real_key`, run `python main.py`.
 
@@ -89,12 +87,12 @@ and falls back to a safe template if all keys fail — the pipeline never crashe
 
 - **YouTube Data API v3** — channel search, stats (multi-key rotation)
 - **YouTube public RSS feeds** — recent videos per channel
-- **Groq API** — Llama-3.1-8b for personalised outreach drafts
+- **Groq API** — Llama-3 for personalised outreach drafts
 - **Python:** `google-api-python-client`, `requests`, `pandas`, `openai`, `python-dotenv`, `streamlit`
 - **SQLite** — local dedupe + resume
 - **SMTP** — test email send
 
-**AI usage:** GPT-based AI assisted code and message templates. Personalised message content is generated live by Groq from each lead's real recent video title. Every lead's evidence URL is stored in `production.db` and `production_leads.csv`.
+**AI usage:** DeepSeek and GPT-based AI assisted code generation and message templates. Personalised message content is generated live by Groq from each lead's real recent video title. Every lead's evidence URL is stored in `production.db` and `production_leads.csv`.
 
 ---
 
