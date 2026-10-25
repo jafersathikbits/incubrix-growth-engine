@@ -9,7 +9,7 @@
 - **country:** US
 - **incubrix_need:** High: 9 recent episodes, needs repurposing.
 - **monetization_signal:** sponsor
-- **generated:** 2026-10-25T09:13:55.622025+00:00
+- **generated:** 2026-10-25T16:24:35.051771+00:00
 
 > **Compliance:** LinkedIn and Instagram messages must be sent MANUALLY. Platform terms forbid automated bulk DMs. Human review before sending.
 

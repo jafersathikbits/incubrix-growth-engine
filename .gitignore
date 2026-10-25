@@ -1,8 +1,0 @@
-.env
-.env.local
-.env.local.bak
-data/*.db
-logs/
-venv/
-__pycache__/
-data/*.db-journal

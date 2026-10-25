@@ -9,7 +9,7 @@
 - **country:** US
 - **incubrix_need:** Medium: Long-form backlog, needs clips.
 - **monetization_signal:** patreon
-- **generated:** 2026-10-25T09:17:05.483938+00:00
+- **generated:** 2026-10-25T16:28:04.609026+00:00
 
 > **Compliance:** LinkedIn and Instagram messages must be sent MANUALLY. Platform terms forbid automated bulk DMs. Human review before sending.
 
