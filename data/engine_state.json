@@ -1,8 +1,8 @@
 {
-  "query_idx": 98,
-  "country_idx": 2,
+  "query_idx": 210,
+  "country_idx": 3,
   "queue": [],
-  "leads_processed": 3738,
-  "a_count": 200,
-  "saved_at": "2026-10-24T15:06:59.407378+00:00"
+  "leads_processed": 3535,
+  "a_count": 0,
+  "saved_at": "2026-10-25T09:13:48.089697+00:00"
 }

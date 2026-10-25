@@ -404,50 +404,34 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                resume_mode=False, source_filter="All", segment_filter="All"):
     init_db(db_path)
     
-    podcast_limit = limit // 2 if source_filter == "All" else limit
-
-    if source_filter in ["All", "Podcast"]:
-        run_podcast_scraper(
-            db_path, 
-            custom_queries, 
-            segment_filter, 
-            podcast_limit, 
-            english_only=english_only, 
-            filter_commercial=filter_commercial
-        )
-
-    if source_filter == "Podcast":
-        print("[ENGINE] Podcast only selected. Skipping YouTube crawl.")
-        if generate_outreach:
-            rebalance_priorities(db_path)
-            generate_all_priority_a_outreach(db_path)
-        return
-
-    try:
-        yt = YouTubeClient()
-    except RuntimeError as e:
-        if "NO_YOUTUBE_KEYS" in str(e):
-            print("[ENGINE] No YouTube API keys found. Skipping YouTube crawl.")
-            if generate_outreach:
-                rebalance_priorities(db_path)
-                generate_all_priority_a_outreach(db_path)
-            return
-        raise e
-
     leads_processed = _count_existing(db_path)
-    
     if leads_processed >= limit:
-        print(f"Already reached target of {limit} leads. Skipping YouTube crawl.")
+        print(f"Already reached target of {limit} leads. Skipping scrape.")
         if generate_outreach:
             rebalance_priorities(db_path)
             generate_all_priority_a_outreach(db_path)
         return
 
+    youtube_exhausted = False
+    podcast_exhausted = False
+
+    # 1. Init YouTube
+    yt = None
+    if source_filter in ["All", "YouTube"]:
+        try:
+            yt = YouTubeClient()
+        except RuntimeError as e:
+            if "NO_YOUTUBE_KEYS" in str(e):
+                print("[ENGINE] No YouTube API keys found. Skipping YouTube crawl.")
+                youtube_exhausted = True
+            else:
+                raise e
+
+    # 2. Init YouTube State
     base_queries = list(custom_queries) if custom_queries else list(SEARCH_QUERIES)
     countries = list(TARGET_COUNTRIES.keys())
+    rejected_cids = set()
     
-    rejected_cids = set() 
-
     if resume_mode:
         state = _load_state()
         query_idx = state.get("query_idx", 0)
@@ -459,226 +443,298 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
         country_idx = 0
         frontier = deque()
 
-    print(f"Starting YouTube engine. Total leads so far: {leads_processed} | Target: {limit}")
     start_ts = time.time()
 
-    try:
-        while leads_processed < limit:
-            if not frontier:
-                if query_idx >= len(base_queries) * len(countries):
-                    print("\n[ENGINE] Exhausted all YouTube search combinations. Stopping YouTube crawl.")
-                    break
-                
-                query = base_queries[query_idx % len(base_queries)]
-                country_code = countries[country_idx % len(countries)]
-                print(f"\n[SEED] Searching YouTube '{query}' in {country_code}...")
-                
-                try:
-                    seeds = yt.search_seeds(query, country_code)
-                except RuntimeError as e:
-                    if "QUOTA_EXHAUSTED" in str(e):
-                        print("\n[ENGINE] YOUTUBE API QUOTA EXHAUSTED. Stopping YouTube crawl to save partial data.")
-                        break
-                    raise e
-                
-                for s in seeds:
-                    if not is_duplicate(db_path, s) and s not in rejected_cids:
-                        frontier.append(s)
-                
-                query_idx += 1
-                if query_idx % len(base_queries) == 0:
-                    country_idx += 1
-                _save_state(query_idx, country_idx, frontier, leads_processed, 0)
-                continue
+    # ==========================================
+    # THE MAIN ORCHESTRATOR LOOP
+    # ==========================================
+    while leads_processed < limit:
+        if podcast_exhausted and youtube_exhausted:
+            print("\n[ENGINE] Both YouTube and Podcast sources exhausted. Stopping early.")
+            break
+        
+        made_progress = False
 
-            batch = []
-            while frontier and len(batch) < 50:
-                cid = frontier.popleft()
-                if not is_duplicate(db_path, cid) and cid not in rejected_cids:
-                    batch.append(cid)
+        # --- PODCAST SCRAPER BLOCK ---
+        if not podcast_exhausted and source_filter in ["All", "Podcast"]:
+            count_before = _count_existing(db_path)
+            print(f"\n[ENGINE LOOP] Running Podcast scraper. Target: {limit}. Current: {count_before}")
+            
+            run_podcast_scraper(
+                db_path, 
+                custom_queries, 
+                segment_filter, 
+                limit, 
+                english_only=english_only, 
+                filter_commercial=filter_commercial
+            )
+            
+            count_after = _count_existing(db_path)
+            if count_after > count_before:
+                made_progress = True
+            else:
+                print("[ENGINE] Podcast scraper found no new leads. Marking Podcasts as exhausted.")
+                podcast_exhausted = True
+            
+            leads_processed = count_after
+            if leads_processed >= limit: break
+            if source_filter == "Podcast": break
 
-            if not batch: continue
+        # --- YOUTUBE SCRAPER BLOCK ---
+        if not youtube_exhausted and source_filter in ["All", "YouTube"] and yt is not None:
+            count_before = _count_existing(db_path)
+            print(f"\n[ENGINE LOOP] Running YouTube scraper. Target: {limit}. Current: {count_before}")
+            
+            try:
+                while leads_processed < limit:
+                    if not frontier:
+                        if query_idx >= len(base_queries) * len(countries):
+                            print("\n[ENGINE] Exhausted all YouTube search combinations.")
+                            youtube_exhausted = True
+                            break
+                        
+                        query = base_queries[query_idx % len(base_queries)]
+                        country_code = countries[country_idx % len(countries)]
+                        print(f"\n[SEED] Searching YouTube '{query}' in {country_code}...")
+                        
+                        try:
+                            seeds = yt.search_seeds(query, country_code)
+                        except RuntimeError as e:
+                            if "QUOTA_EXHAUSTED" in str(e):
+                                print("\n[ENGINE] YOUTUBE API QUOTA EXHAUSTED during search. Stopping YouTube crawl.")
+                                youtube_exhausted = True
+                                break
+                            raise e
+                        
+                        for s in seeds:
+                            if not is_duplicate(db_path, s) and s not in rejected_cids:
+                                frontier.append(s)
+                        
+                        query_idx += 1
+                        if query_idx % len(base_queries) == 0:
+                            country_idx += 1
+                        _save_state(query_idx, country_idx, frontier, leads_processed, 0)
+                        continue
 
-            print(f"\n[BATCH] Checking {len(batch)} channels from queue...")
-            channels_data = yt.get_batch_channel_details(batch)
+                    batch = []
+                    while frontier and len(batch) < 50:
+                        cid = frontier.popleft()
+                        if not is_duplicate(db_path, cid) and cid not in rejected_cids:
+                            batch.append(cid)
 
-            for c in channels_data:
-                cid = c["id"]
-                snippet = c.get("snippet", {})
-                stats = c.get("statistics", {})
-                branding = c.get("brandingSettings", {}).get("channel", {})
-                
-                title = snippet.get("title", "Unknown")
-                sub = int(stats.get("subscriberCount", 0))
-                rc = snippet.get("country")
-                desc = snippet.get("description", "")
-                
-                featured = branding.get("featuredChannelsUrls", [])
-                for f in featured:
-                    if not is_duplicate(db_path, f) and f not in rejected_cids:
-                        frontier.append(f)
+                    if not batch: continue
 
-                title_lower = title.lower()
-                if any(kw in title_lower for kw in EXCLUDE_KEYWORDS):
-                    rejected_cids.add(cid)
-                    continue
-
-                if not rc or rc not in APPROVED_COUNTRIES: 
-                    rejected_cids.add(cid)
-                    continue
-                
-                dist = _country_distribution(db_path)
-                total_q = sum(dist.values())
-                if not _country_allowed(rc, dist, total_q): 
-                    rejected_cids.add(cid)
-                    continue
-                if sub < min_subs or sub > max_subs: 
-                    rejected_cids.add(cid)
-                    continue
-                if not NICHE_RE.search(desc + " " + title): 
-                    rejected_cids.add(cid)
-                    continue
-                
-                if segment_filter != "All" and _classify_youtube_segment(title, desc) != segment_filter:
-                    rejected_cids.add(cid)
-                    continue
-                
-                email = find_email_from_description(desc)
-                if is_publication(title, email): 
-                    rejected_cids.add(cid)
-                    continue
-
-                print(f"  -> Extracting: {title} ({sub:,} subs)")
-                
-                videos = yt.get_latest_videos_rss(cid)
-                if not videos: 
-                    rejected_cids.add(cid)
-                    continue
-                if english_only and not _is_mostly_english(videos): 
-                    rejected_cids.add(cid)
-                    continue
-                
-                lang_ok, _ = verify_language(title, videos)
-                if not lang_ok: 
-                    rejected_cids.add(cid)
-                    continue
-                
-                vids_to_check = [v["video_id"] for v in videos]
-                vid_stats = yt.get_video_stats_and_durations(vids_to_check)
-                
-                total_views = 0
-                total_likes = 0
-                total_comments = 0
-                
-                for v in videos:
-                    vid_id = v["video_id"]
-                    s = vid_stats.get(vid_id, {})
-                    v["duration"] = s.get("duration", 0)
-                    v["views"] = s.get("views", 0)
-                    v["likes"] = s.get("likes", 0)
-                    v["comments"] = s.get("comments", 0)
+                    print(f"\n[BATCH] Checking {len(batch)} channels from queue...")
                     
-                    total_views += v["views"]
-                    total_likes += v["likes"]
-                    total_comments += v["comments"]
+                    try:
+                        channels_data = yt.get_batch_channel_details(batch)
+                    except RuntimeError as e:
+                        if "QUOTA_EXHAUSTED" in str(e):
+                            print("\n[ENGINE] YOUTUBE API QUOTA EXHAUSTED during batch details. Stopping YouTube crawl.")
+                            youtube_exhausted = True
+                            break
+                        raise e
 
-                engagement_ratio = 0.0
-                if total_views > 0:
-                    engagement_ratio = (total_likes + total_comments) / total_views
+                    for c in channels_data:
+                        cid = c["id"]
+                        snippet = c.get("snippet", {})
+                        stats = c.get("statistics", {})
+                        branding = c.get("brandingSettings", {}).get("channel", {})
+                        
+                        title = snippet.get("title", "Unknown")
+                        sub = int(stats.get("subscriberCount", 0))
+                        rc = snippet.get("country")
+                        desc = snippet.get("description", "")
+                        
+                        featured = branding.get("featuredChannelsUrls", [])
+                        for f in featured:
+                            if not is_duplicate(db_path, f) and f not in rejected_cids:
+                                frontier.append(f)
 
-                activity = yt.check_channel_activity(sub, videos, min_subs, max_subs, min_vids_30d, min_vids_60d)
-                if activity.get("status") == "Rejected": 
-                    rejected_cids.add(cid)
-                    continue
+                        title_lower = title.lower()
+                        if any(kw in title_lower for kw in EXCLUDE_KEYWORDS):
+                            rejected_cids.add(cid)
+                            continue
 
-                recent_video = videos[0]
-                
-                all_desc = desc + " " + " ".join(v.get("description", "") for v in videos)
-                socials = extract_socials_from_text(all_desc)
-                if not email: email = find_email_from_description(all_desc)
-                
-                if email: best_channel, handle = "Email", email
-                elif socials["linkedin"]: best_channel, handle = "LinkedIn", socials["linkedin"]
-                elif socials["instagram"]: best_channel, handle = "Instagram", socials["instagram"]
-                else: 
-                    rejected_cids.add(cid)
-                    continue
-                
-                commercial = check_commercial_and_need(all_desc, activity["longform_count"], activity["short_count"])
-                if filter_commercial and not commercial["has_money"]: 
-                    rejected_cids.add(cid)
-                    continue
-                if not commercial["has_real_need"]: 
-                    rejected_cids.add(cid)
-                    continue
+                        if not rc or rc not in APPROVED_COUNTRIES: 
+                            rejected_cids.add(cid)
+                            continue
+                        
+                        dist = _country_distribution(db_path)
+                        total_q = sum(dist.values())
+                        if not _country_allowed(rc, dist, total_q): 
+                            rejected_cids.add(cid)
+                            continue
+                        if sub < min_subs or sub > max_subs: 
+                            rejected_cids.add(cid)
+                            continue
+                        if not NICHE_RE.search(desc + " " + title): 
+                            rejected_cids.add(cid)
+                            continue
+                        
+                        if segment_filter != "All" and _classify_youtube_segment(title, desc) != segment_filter:
+                            rejected_cids.add(cid)
+                            continue
+                        
+                        email = find_email_from_description(desc)
+                        if is_publication(title, email): 
+                            rejected_cids.add(cid)
+                            continue
 
-                days_since = 999
-                try:
-                    pub = datetime.fromisoformat(recent_video["published_at"].replace("Z", "+00:00"))
-                    days_since = (datetime.now(timezone.utc) - pub).days
-                except: pass
+                        print(f"  -> Extracting: {title} ({sub:,} subs)")
+                        
+                        videos = yt.get_latest_videos_rss(cid)
+                        if not videos: 
+                            rejected_cids.add(cid)
+                            continue
+                        if english_only and not _is_mostly_english(videos): 
+                            rejected_cids.add(cid)
+                            continue
+                        
+                        lang_ok, _ = verify_language(title, videos)
+                        if not lang_ok: 
+                            rejected_cids.add(cid)
+                            continue
+                        
+                        vids_to_check = [v["video_id"] for v in videos]
+                        vid_stats = yt.get_video_stats_and_durations(vids_to_check)
+                        
+                        total_views = 0
+                        total_likes = 0
+                        total_comments = 0
+                        
+                        for v in videos:
+                            vid_id = v["video_id"]
+                            s = vid_stats.get(vid_id, {})
+                            v["duration"] = s.get("duration", 0)
+                            v["views"] = s.get("views", 0)
+                            v["likes"] = s.get("likes", 0)
+                            v["comments"] = s.get("comments", 0)
+                            
+                            total_views += v["views"]
+                            total_likes += v["likes"]
+                            total_comments += v["comments"]
 
-                score = calculate_score(
-                    subscribers=sub, has_email=bool(email), has_social=bool(socials["linkedin"] or socials["instagram"]),
-                    video_count=activity["count_30d"], has_money=commercial["has_money"],
-                    pain_signals=commercial.get("pain_signals", []),
-                    longform_count=activity["longform_count"], short_count=activity["short_count"],
-                    days_since_post=days_since, has_editor=commercial.get("has_editor", False),
-                    engagement_ratio=engagement_ratio
-                )
+                        engagement_ratio = 0.0
+                        if total_views > 0:
+                            engagement_ratio = (total_likes + total_comments) / total_views
 
-                priority = determine_priority(score)
+                        activity = yt.check_channel_activity(sub, videos, min_subs, max_subs, min_vids_30d, min_vids_60d)
+                        if activity.get("status") == "Rejected": 
+                            rejected_cids.add(cid)
+                            continue
 
-                backup = None
-                if best_channel != "Email" and email: backup = "Email"
-                elif best_channel != "LinkedIn" and socials["linkedin"]: backup = "LinkedIn"
-                elif best_channel != "Instagram" and socials["instagram"]: backup = "Instagram"
+                        recent_video = videos[0]
+                        
+                        all_desc = desc + " " + " ".join(v.get("description", "") for v in videos)
+                        socials = extract_socials_from_text(all_desc)
+                        if not email: email = find_email_from_description(all_desc)
+                        
+                        if email: best_channel, handle = "Email", email
+                        elif socials["linkedin"]: best_channel, handle = "LinkedIn", socials["linkedin"]
+                        elif socials["instagram"]: best_channel, handle = "Instagram", socials["instagram"]
+                        else: 
+                            rejected_cids.add(cid)
+                            continue
+                        
+                        commercial = check_commercial_and_need(all_desc, activity["longform_count"], activity["short_count"])
+                        if filter_commercial and not commercial["has_money"]: 
+                            rejected_cids.add(cid)
+                            continue
+                        if not commercial["has_real_need"]: 
+                            rejected_cids.add(cid)
+                            continue
 
-                mon_vid = _find_evidence_video(videos, commercial["monetization_signal"])
-                mon_url = f"https://youtube.com/watch?v={mon_vid['video_id']}" if mon_vid else ""
-                need_url = f"https://youtube.com/watch?v={recent_video['video_id']}"
+                        days_since = 999
+                        try:
+                            pub = datetime.fromisoformat(recent_video["published_at"].replace("Z", "+00:00"))
+                            days_since = (datetime.now(timezone.utc) - pub).days
+                        except: pass
 
-                if priority == "A":
-                    print(f"     -> AI outreach (score={score}, priority=A)...")
-                    ai_data = generate_personalized_outreach(creator_name=title, recent_video_title=recent_video["title"], channel_name=title)
+                        score = calculate_score(
+                            subscribers=sub, has_email=bool(email), has_social=bool(socials["linkedin"] or socials["instagram"]),
+                            video_count=activity["count_30d"], has_money=commercial["has_money"],
+                            pain_signals=commercial.get("pain_signals", []),
+                            longform_count=activity["longform_count"], short_count=activity["short_count"],
+                            days_since_post=days_since, has_editor=commercial.get("has_editor", False),
+                            engagement_ratio=engagement_ratio
+                        )
+
+                        priority = determine_priority(score)
+
+                        backup = None
+                        if best_channel != "Email" and email: backup = "Email"
+                        elif best_channel != "LinkedIn" and socials["linkedin"]: backup = "LinkedIn"
+                        elif best_channel != "Instagram" and socials["instagram"]: backup = "Instagram"
+
+                        mon_vid = _find_evidence_video(videos, commercial["monetization_signal"])
+                        mon_url = f"https://youtube.com/watch?v={mon_vid['video_id']}" if mon_vid else ""
+                        need_url = f"https://youtube.com/watch?v={recent_video['video_id']}"
+
+                        if priority == "A":
+                            print(f"     -> AI outreach (score={score}, priority=A)...")
+                            ai_data = generate_personalized_outreach(creator_name=title, recent_video_title=recent_video["title"], channel_name=title)
+                        else:
+                            ai_data = _template_ai_data(recent_video["title"], title)
+
+                        def _clean(s): return (s or "").replace("[Name]", title).replace("[Creator]", title)
+
+                        lead_data = {
+                            "stable_creator_id": cid, "creator_name": title, "country_iso2": rc,
+                            "primary_platform": "YouTube", "profile_url": f"https://youtube.com/channel/{cid}",
+                            "followers_or_subscribers": sub, "last_content_date": recent_video["published_at"],
+                            "recent_content_url": f"https://youtube.com/watch?v={recent_video['video_id']}",
+                            "content_count_30d": activity["count_30d"], "longform_count_60d": activity["longform_count"],
+                            "monetization_signal": commercial["monetization_signal"], "monetization_evidence_url": mon_url,
+                            "incubrix_need": commercial["incubrix_need"], "need_evidence_url": need_url,
+                            "best_channel": best_channel, "channel_handle_or_url": handle,
+                            "channel_evidence_url": f"https://youtube.com/channel/{cid}/about", "backup_channel": backup,
+                            "personalization_hook": _clean(ai_data.get("hook")),
+                            "first_message": _clean(ai_data.get("email") if best_channel == "Email" else ai_data.get("linkedin") if best_channel == "LinkedIn" else ai_data.get("instagram")),
+                            "checked_date": time.strftime("%Y-%m-%d"), "priority": priority,
+                            "lead_score": score, "candidate_status": "Qualified",
+                            "duplicate_check": "UNIQUE", "completeness_check": "COMPLETE",
+                        }
+
+                        insert_lead(db_path, lead_data)
+                        leads_processed += 1
+                        print(f"     -> SAVED {title} ({leads_processed}/{limit}) [{rc}] score={score} pri={priority} | engagement={engagement_ratio:.2%}")
+
+                        lead_data["recent_video_title"] = recent_video["title"]
+                        if generate_outreach and priority == "A":
+                            try: generate_priority_a_pack(lead_data, ai_data=ai_data)
+                            except Exception as e: print(f"     -> [WARN] Pack failed: {e}")
+
+                        if sleep_between > 0: time.sleep(sleep_between)
+                        _save_state(query_idx, country_idx, frontier, leads_processed, 0)
+
+            except RuntimeError as e:
+                if "QUOTA_EXHAUSTED" in str(e):
+                    print("\n[ENGINE] YOUTUBE API QUOTA EXHAUSTED. Stopping YouTube crawl to save partial data.")
+                    youtube_exhausted = True
                 else:
-                    ai_data = _template_ai_data(recent_video["title"], title)
+                    print(f"[ENGINE] YouTube error: {e}")
+                    youtube_exhausted = True
+            except Exception as e:
+                print(f"[ENGINE] YouTube error: {e}")
+                youtube_exhausted = True
+            
+            count_after = _count_existing(db_path)
+            if count_after > count_before:
+                made_progress = True
+            
+            leads_processed = count_after
+            if leads_processed >= limit: break
+            if source_filter == "YouTube": break
 
-                def _clean(s): return (s or "").replace("[Name]", title).replace("[Creator]", title)
+        # --- STOP CONDITION ---
+        if not made_progress:
+            print("\n[ENGINE] No progress made in the last loop iteration. Both sources may be exhausted. Stopping.")
+            break
 
-                lead_data = {
-                    "stable_creator_id": cid, "creator_name": title, "country_iso2": rc,
-                    "primary_platform": "YouTube", "profile_url": f"https://youtube.com/channel/{cid}",
-                    "followers_or_subscribers": sub, "last_content_date": recent_video["published_at"],
-                    "recent_content_url": f"https://youtube.com/watch?v={recent_video['video_id']}",
-                    "content_count_30d": activity["count_30d"], "longform_count_60d": activity["longform_count"],
-                    "monetization_signal": commercial["monetization_signal"], "monetization_evidence_url": mon_url,
-                    "incubrix_need": commercial["incubrix_need"], "need_evidence_url": need_url,
-                    "best_channel": best_channel, "channel_handle_or_url": handle,
-                    "channel_evidence_url": f"https://youtube.com/channel/{cid}/about", "backup_channel": backup,
-                    "personalization_hook": _clean(ai_data.get("hook")),
-                    "first_message": _clean(ai_data.get("email") if best_channel == "Email" else ai_data.get("linkedin") if best_channel == "LinkedIn" else ai_data.get("instagram")),
-                    "checked_date": time.strftime("%Y-%m-%d"), "priority": priority,
-                    "lead_score": score, "candidate_status": "Qualified",
-                    "duplicate_check": "UNIQUE", "completeness_check": "COMPLETE",
-                }
-
-                insert_lead(db_path, lead_data)
-                leads_processed += 1
-                print(f"     -> SAVED {title} ({leads_processed}/{limit}) [{rc}] score={score} pri={priority} | engagement={engagement_ratio:.2%}")
-
-                lead_data["recent_video_title"] = recent_video["title"]
-                if generate_outreach and priority == "A":
-                    try: generate_priority_a_pack(lead_data, ai_data=ai_data)
-                    except Exception as e: print(f"     -> [WARN] Pack failed: {e}")
-
-                if sleep_between > 0: time.sleep(sleep_between)
-                _save_state(query_idx, country_idx, frontier, leads_processed, 0)
-
-    finally:
-        duration = time.time() - start_ts
-        print(f"\nRun complete. Total leads in DB: {leads_processed}. Duration: {duration/60:.1f} mins.")
-        _save_state(query_idx, country_idx, frontier, leads_processed, 0)
+    duration = time.time() - start_ts
+    print(f"\nRun complete. Total leads in DB: {leads_processed}. Duration: {duration/60:.1f} mins.")
+    _save_state(query_idx, country_idx, frontier, leads_processed, 0)
 
     if generate_outreach:
         rebalance_priorities(db_path)
