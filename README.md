@@ -10,67 +10,56 @@ creators, and expert-led creators in 7 approved English markets. Reruns weekly w
 
 ```bash
 pip install -r requirements.txt
-```
+Create .env from .env.example and fill in:
+YOUTUBE_API_KEYS, GROQ_API_KEY, SMTP_*, SENDER_NAME, SENDER_TITLE.
 
-Create `.env` from `.env.example` and fill in:
-`YOUTUBE_API_KEYS`, `GROQ_API_KEY`, `SMTP_*`, `SENDER_NAME`, `SENDER_TITLE`.
-
----
-
-## Run Command (one command)
-
-```bash
+Run Command (one command)
+bash
 python main.py
-```
-
 Runs the engine end-to-end. Outputs:
 
-- `data/production.db` — SQLite source of truth
-- `data/production_leads.csv` — full qualified list (UTF-8)
-- `data/production_priority_a.csv` — Priority A only
-- `outreach/priority_a/<lead_id>.md` — 3 channels × 3 messages per Priority A lead
-- `logs/engine.log` — runtime log
+data/production.db — SQLite source of truth
 
-### Optional UI
+data/production_leads.csv — full qualified list (UTF-8)
 
-```bash
+data/production_priority_a.csv — Priority A only
+
+outreach/priority_a/<lead_id>.md — 3 channels × 3 messages per Priority A lead
+
+logs/engine.log — runtime log
+
+Optional UI
+bash
 streamlit run app.py
-```
+Opens at http://localhost:8501 for visual browsing (used in the technical demo video).
 
-Opens at `http://localhost:8501` for visual browsing (used in the product walkthrough video).
-
-### Resume / Refresh
-
-```bash
+Resume / Refresh
+bash
 python -m src.resume_main
-```
-
 Appends new leads to the existing DB (no duplicates), regenerates Priority A packs, re-exports CSV.
 
-### Tests
-
-```bash
+Tests
+bash
 pytest -q
-```
-
-### Seed test (3-channel proof)
-
-```bash
+Seed test (3-channel proof)
+bash
 python -m src.seed_test --send --all
 python -m src.seed_test --report
-```
+text
 
+**Block 2:**
+```markdown
 Uses test accounts from `.env` only. LinkedIn and Instagram messages are queued for manual send (platform rules forbid bulk automation).
 
 ---
 
-## Runtime & cost (at 6,000 leads)
+## Runtime & cost (at 5,028 leads)
 
 | Step | Time | Cost |
 |---|---|---|
 | YouTube search + channels.list | 30–45 min | ₹0 (free quota) |
 | YouTube RSS fetches | 60–90 min | ₹0 |
-| Groq LLM (Priority A ≈ 250) | 3–5 min | ~$0.10 |
+| Groq LLM (Priority A ≈ 559) | 3–5 min | ~$0.10 |
 | **Total** | **~2–3 hrs** | **< $0.20** |
 
 ---
@@ -109,28 +98,25 @@ and falls back to a safe template if all keys fail — the pipeline never crashe
 ---
 
 ## Repository layout
-
-```
 .
-├── main.py                     # entry point
-├── app.py                      # optional Streamlit UI
+├── main.py # entry point
+├── app.py # optional Streamlit UI
 ├── README.md
 ├── PRODUCT_INSIGHTS.md
 ├── requirements.txt
 ├── .env.example
-├── outreach/                   # segment sequences + generated per-lead packs
+├── outreach/ # segment sequences + generated per-lead packs
 ├── src/
-│   ├── config.py
-│   ├── youtube_api.py
-│   ├── enrichment.py
-│   ├── scoring.py
-│   ├── ai_agent.py
-│   ├── outreach_gen.py
-│   ├── database.py
-│   ├── exporter.py
-│   ├── email_sender.py
-│   ├── seed_test.py
-│   └── resume_main.py
+│ ├── config.py
+│ ├── youtube_api.py
+│ ├── enrichment.py
+│ ├── scoring.py
+│ ├── ai_agent.py
+│ ├── outreach_gen.py
+│ ├── database.py
+│ ├── exporter.py
+│ ├── email_sender.py
+│ ├── seed_test.py
+│ └── resume_main.py
 └── tests/
-    └── test_engine.py
-```
+└── test_engine.py
