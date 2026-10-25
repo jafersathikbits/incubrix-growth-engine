@@ -9,6 +9,7 @@ import hashlib
 import xml.etree.ElementTree as ET
 from collections import deque
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 from src.database import init_db, is_duplicate, insert_lead
 from src.youtube_api import YouTubeClient
@@ -113,7 +114,7 @@ def _get_rss_stats_and_segment(xml_text, name):
 
     return count_30d, latest_date, segment, monetization
 
-def run_podcast_scraper(db_path, queries, segment_filter, limit=5000, english_only=True, filter_commercial=True):
+def run_podcast_scraper(db_path, queries, segment_filter, limit=5000, english_only=True, filter_commercial=True, min_podcast_episodes=0):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM leads WHERE primary_platform='Podcast'")
@@ -174,6 +175,11 @@ def run_podcast_scraper(db_path, queries, segment_filter, limit=5000, english_on
                                 continue
 
                             count_30d, latest_date, segment, mon_signal = _get_rss_stats_and_segment(xml_text, name)
+                            
+                            # --- PODCAST FILTER ---
+                            if count_30d < min_podcast_episodes:
+                                continue
+                            # ----------------------
                             
                             if segment_filter != "All" and segment != segment_filter:
                                 continue
@@ -337,6 +343,15 @@ def _count_existing(db_path):
     except: return 0
     finally: conn.close()
 
+def _count_by_platform(db_path, platform):
+    if not os.path.exists(db_path): return 0
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM leads WHERE primary_platform = ?", (platform,)).fetchone()
+        return row[0] if row else 0
+    except: return 0
+    finally: conn.close()
+
 def _template_ai_data(recent_title, creator_name):
     return {
         "hook": f"Your recent video: {recent_title}.",
@@ -356,7 +371,8 @@ def rebalance_priorities(db_path):
     total_a = 0
     for (plat,) in platforms:
         count = cursor.execute("SELECT COUNT(*) FROM leads WHERE primary_platform = ? AND candidate_status='Qualified'", (plat,)).fetchone()[0]
-        cap = max(5, round(count * 0.05))
+        # Cap at 25 as per assessment PDF requirement
+        cap = max(5, min(25, round(count * 0.05)))
         
         query = """
             UPDATE leads
@@ -374,7 +390,7 @@ def rebalance_priorities(db_path):
         
     conn.commit()
     conn.close()
-    print(f"[REBALANCE] Total Priority A leads set to {total_a} (5% of actual leads per platform).")
+    print(f"[REBALANCE] Total Priority A leads set to {total_a} (Max 25 per platform).")
 
 def generate_all_priority_a_outreach(db_path):
     if not os.path.exists(db_path): return
@@ -401,11 +417,34 @@ def generate_all_priority_a_outreach(db_path):
 def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                min_subs=5000, max_subs=100000, min_vids_30d=8, min_vids_60d=2,
                english_only=True, generate_outreach=True, sleep_between=0.2,
-               resume_mode=False, source_filter="All", segment_filter="All"):
-    init_db(db_path)
+               resume_mode=False, source_filter="All", segment_filter="All", min_podcast_episodes=0,
+               workspace=None):
     
-    leads_processed = _count_existing(db_path)
-    if leads_processed >= limit:
+    if workspace is not None:
+        global STATE_FILE, PODCAST_STATE_FILE
+        ws = Path(workspace)
+        ws.mkdir(parents=True, exist_ok=True)
+        STATE_FILE = ws / "engine_state.json"
+        PODCAST_STATE_FILE = ws / "podcast_state.json"
+
+    init_db(db_path)
+
+    if source_filter == "All":
+        yt_target = (limit + 1) // 2
+        pod_target = limit - yt_target
+    elif source_filter == "YouTube":
+        yt_target, pod_target = limit, 0
+    else:
+        yt_target, pod_target = 0, limit
+
+    yt_count = _count_by_platform(db_path, "YouTube")
+    pod_count = _count_by_platform(db_path, "Podcast")
+    total_existing = yt_count + pod_count
+
+    print(f"[ENGINE] Targets -> YouTube: {yt_target}, Podcast: {pod_target} (limit={limit})")
+    print(f"[ENGINE] Existing -> YouTube: {yt_count}, Podcast: {pod_count}")
+
+    if total_existing >= limit:
         print(f"Already reached target of {limit} leads. Skipping scrape.")
         if generate_outreach:
             rebalance_priorities(db_path)
@@ -415,7 +454,6 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
     youtube_exhausted = False
     podcast_exhausted = False
 
-    # 1. Init YouTube
     yt = None
     if source_filter in ["All", "YouTube"]:
         try:
@@ -427,7 +465,6 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
             else:
                 raise e
 
-    # 2. Init YouTube State
     base_queries = list(custom_queries) if custom_queries else list(SEARCH_QUERIES)
     countries = list(TARGET_COUNTRIES.keys())
     rejected_cids = set()
@@ -445,48 +482,64 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
 
     start_ts = time.time()
 
-    # ==========================================
-    # THE MAIN ORCHESTRATOR LOOP
-    # ==========================================
-    while leads_processed < limit:
-        if podcast_exhausted and youtube_exhausted:
+    while True:
+        yt_count = _count_by_platform(db_path, "YouTube")
+        pod_count = _count_by_platform(db_path, "Podcast")
+        total = yt_count + pod_count
+
+        if podcast_exhausted and not youtube_exhausted:
+            new_yt = limit - pod_count
+            if new_yt > yt_target:
+                print(f"[ENGINE] Podcast exhausted -> YouTube target raised {yt_target} -> {new_yt}.")
+                yt_target = new_yt
+        if youtube_exhausted and not podcast_exhausted:
+            new_pod = limit - yt_count
+            if new_pod > pod_target:
+                print(f"[ENGINE] YouTube exhausted -> Podcast target raised {pod_target} -> {new_pod}.")
+                pod_target = new_pod
+
+        if yt_count >= yt_target and pod_count >= pod_target:
+            print(f"\n[ENGINE] All targets reached (YouTube: {yt_count}/{yt_target}, Podcast: {pod_count}/{pod_target}).")
+            break
+        if youtube_exhausted and podcast_exhausted:
             print("\n[ENGINE] Both YouTube and Podcast sources exhausted. Stopping early.")
             break
-        
+        if total >= limit:
+            print(f"\n[ENGINE] Global limit of {limit} reached.")
+            break
+
         made_progress = False
 
-        # --- PODCAST SCRAPER BLOCK ---
-        if not podcast_exhausted and source_filter in ["All", "Podcast"]:
-            count_before = _count_existing(db_path)
-            print(f"\n[ENGINE LOOP] Running Podcast scraper. Target: {limit}. Current: {count_before}")
-            
+        if (not podcast_exhausted and source_filter in ["All", "Podcast"] and pod_count < pod_target):
+            print(f"\n[ENGINE LOOP] Podcast scraper. Target: {pod_target} (current: {pod_count})")
+            count_before = pod_count
+
             run_podcast_scraper(
-                db_path, 
-                custom_queries, 
-                segment_filter, 
-                limit, 
-                english_only=english_only, 
-                filter_commercial=filter_commercial
+                db_path, custom_queries, segment_filter, pod_target,
+                english_only=english_only, filter_commercial=filter_commercial,
+                min_podcast_episodes=min_podcast_episodes
             )
-            
-            count_after = _count_existing(db_path)
+
+            count_after = _count_by_platform(db_path, "Podcast")
             if count_after > count_before:
                 made_progress = True
             else:
                 print("[ENGINE] Podcast scraper found no new leads. Marking Podcasts as exhausted.")
                 podcast_exhausted = True
-            
-            leads_processed = count_after
-            if leads_processed >= limit: break
-            if source_filter == "Podcast": break
+            pod_count = count_after
 
-        # --- YOUTUBE SCRAPER BLOCK ---
-        if not youtube_exhausted and source_filter in ["All", "YouTube"] and yt is not None:
-            count_before = _count_existing(db_path)
-            print(f"\n[ENGINE LOOP] Running YouTube scraper. Target: {limit}. Current: {count_before}")
+        if (not youtube_exhausted and source_filter in ["All", "YouTube"] and yt is not None and yt_count < yt_target):
+            yt_count = _count_by_platform(db_path, "YouTube")
+            pod_count = _count_by_platform(db_path, "Podcast")
+            if podcast_exhausted:
+                yt_target = max(yt_target, limit - pod_count)
+
+            print(f"\n[ENGINE LOOP] YouTube scraper. Target: {yt_target} (current: {yt_count})")
             
             try:
-                while leads_processed < limit:
+                while yt_count < yt_target and not youtube_exhausted:
+                    if _count_existing(db_path) >= limit:
+                        break
                     if not frontier:
                         if query_idx >= len(base_queries) * len(countries):
                             print("\n[ENGINE] Exhausted all YouTube search combinations.")
@@ -513,7 +566,7 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                         query_idx += 1
                         if query_idx % len(base_queries) == 0:
                             country_idx += 1
-                        _save_state(query_idx, country_idx, frontier, leads_processed, 0)
+                        _save_state(query_idx, country_idx, frontier, yt_count, 0)
                         continue
 
                     batch = []
@@ -536,6 +589,11 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                         raise e
 
                     for c in channels_data:
+                        if _count_existing(db_path) >= limit:
+                            print(f"\n[ENGINE] Reached global limit of {limit}. Stopping.")
+                            youtube_exhausted = True
+                            break
+
                         cid = c["id"]
                         snippet = c.get("snippet", {})
                         stats = c.get("statistics", {})
@@ -553,79 +611,60 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
 
                         title_lower = title.lower()
                         if any(kw in title_lower for kw in EXCLUDE_KEYWORDS):
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
 
                         if not rc or rc not in APPROVED_COUNTRIES: 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         
                         dist = _country_distribution(db_path)
                         total_q = sum(dist.values())
                         if not _country_allowed(rc, dist, total_q): 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         if sub < min_subs or sub > max_subs: 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         if not NICHE_RE.search(desc + " " + title): 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         
                         if segment_filter != "All" and _classify_youtube_segment(title, desc) != segment_filter:
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         
                         email = find_email_from_description(desc)
                         if is_publication(title, email): 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
 
                         print(f"  -> Extracting: {title} ({sub:,} subs)")
                         
                         videos = yt.get_latest_videos_rss(cid)
                         if not videos: 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         if english_only and not _is_mostly_english(videos): 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         
                         lang_ok, _ = verify_language(title, videos)
                         if not lang_ok: 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         
                         vids_to_check = [v["video_id"] for v in videos]
                         vid_stats = yt.get_video_stats_and_durations(vids_to_check)
                         
-                        total_views = 0
-                        total_likes = 0
-                        total_comments = 0
-                        
+                        total_views = total_likes = total_comments = 0
                         for v in videos:
-                            vid_id = v["video_id"]
-                            s = vid_stats.get(vid_id, {})
+                            s = vid_stats.get(v["video_id"], {})
                             v["duration"] = s.get("duration", 0)
                             v["views"] = s.get("views", 0)
                             v["likes"] = s.get("likes", 0)
                             v["comments"] = s.get("comments", 0)
-                            
                             total_views += v["views"]
                             total_likes += v["likes"]
                             total_comments += v["comments"]
 
-                        engagement_ratio = 0.0
-                        if total_views > 0:
-                            engagement_ratio = (total_likes + total_comments) / total_views
+                        engagement_ratio = (total_likes + total_comments) / total_views if total_views > 0 else 0.0
 
                         activity = yt.check_channel_activity(sub, videos, min_subs, max_subs, min_vids_30d, min_vids_60d)
                         if activity.get("status") == "Rejected": 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
 
                         recent_video = videos[0]
-                        
                         all_desc = desc + " " + " ".join(v.get("description", "") for v in videos)
                         socials = extract_socials_from_text(all_desc)
                         if not email: email = find_email_from_description(all_desc)
@@ -634,16 +673,13 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                         elif socials["linkedin"]: best_channel, handle = "LinkedIn", socials["linkedin"]
                         elif socials["instagram"]: best_channel, handle = "Instagram", socials["instagram"]
                         else: 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         
                         commercial = check_commercial_and_need(all_desc, activity["longform_count"], activity["short_count"])
                         if filter_commercial and not commercial["has_money"]: 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
                         if not commercial["has_real_need"]: 
-                            rejected_cids.add(cid)
-                            continue
+                            rejected_cids.add(cid); continue
 
                         days_since = 999
                         try:
@@ -661,7 +697,6 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                         )
 
                         priority = determine_priority(score)
-
                         backup = None
                         if best_channel != "Email" and email: backup = "Email"
                         elif best_channel != "LinkedIn" and socials["linkedin"]: backup = "LinkedIn"
@@ -697,8 +732,8 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                         }
 
                         insert_lead(db_path, lead_data)
-                        leads_processed += 1
-                        print(f"     -> SAVED {title} ({leads_processed}/{limit}) [{rc}] score={score} pri={priority} | engagement={engagement_ratio:.2%}")
+                        yt_count += 1
+                        print(f"     -> SAVED {title} ({yt_count}/{yt_target}) [{rc}] score={score} pri={priority} | engagement={engagement_ratio:.2%}")
 
                         lead_data["recent_video_title"] = recent_video["title"]
                         if generate_outreach and priority == "A":
@@ -706,35 +741,33 @@ def run_engine(db_path, limit=6000, custom_queries=None, filter_commercial=True,
                             except Exception as e: print(f"     -> [WARN] Pack failed: {e}")
 
                         if sleep_between > 0: time.sleep(sleep_between)
-                        _save_state(query_idx, country_idx, frontier, leads_processed, 0)
+                        _save_state(query_idx, country_idx, frontier, yt_count, 0)
 
             except RuntimeError as e:
                 if "QUOTA_EXHAUSTED" in str(e):
                     print("\n[ENGINE] YOUTUBE API QUOTA EXHAUSTED. Stopping YouTube crawl to save partial data.")
-                    youtube_exhausted = True
                 else:
                     print(f"[ENGINE] YouTube error: {e}")
-                    youtube_exhausted = True
+                youtube_exhausted = True
             except Exception as e:
                 print(f"[ENGINE] YouTube error: {e}")
                 youtube_exhausted = True
             
-            count_after = _count_existing(db_path)
-            if count_after > count_before:
+            count_after = _count_by_platform(db_path, "YouTube")
+            if count_after > yt_count:
                 made_progress = True
-            
-            leads_processed = count_after
-            if leads_processed >= limit: break
-            if source_filter == "YouTube": break
+            yt_count = count_after
 
-        # --- STOP CONDITION ---
         if not made_progress:
             print("\n[ENGINE] No progress made in the last loop iteration. Both sources may be exhausted. Stopping.")
             break
 
-    duration = time.time() - start_ts
-    print(f"\nRun complete. Total leads in DB: {leads_processed}. Duration: {duration/60:.1f} mins.")
-    _save_state(query_idx, country_idx, frontier, leads_processed, 0)
+    yt_final  = _count_by_platform(db_path, "YouTube")
+    pod_final = _count_by_platform(db_path, "Podcast")
+    total     = yt_final + pod_final
+    duration  = time.time() - start_ts
+    print(f"\nRun complete. YouTube: {yt_final}/{yt_target}, Podcast: {pod_final}/{pod_target}, Total: {total}/{limit}. Duration: {duration/60:.1f} mins.")
+    _save_state(query_idx, country_idx, frontier, yt_final, 0)
 
     if generate_outreach:
         rebalance_priorities(db_path)

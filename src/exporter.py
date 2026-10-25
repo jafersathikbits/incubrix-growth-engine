@@ -13,7 +13,8 @@ def _derive_segment(creator_name, monetization_signal, incubrix_need):
 
 def export_to_csv(db_path, full_csv_path, priority_csv_path):
     conn = sqlite3.connect(db_path)
-    # Sorts by lead_score DESC. If tied, sorts by content_count_30d DESC (favors active podcasts/creators)
+    
+    # UPDATED QUERY: Adds strict activity filtering directly in the SQL
     query = """
     SELECT 
         lead_id, creator_name, country_iso2, primary_platform, profile_url,
@@ -26,6 +27,10 @@ def export_to_csv(db_path, full_csv_path, priority_csv_path):
         rejection_reason, duplicate_check, completeness_check
     FROM leads
     WHERE candidate_status = 'Qualified'
+      AND (
+          COALESCE(CAST(content_count_30d AS INTEGER), 0) >= 8 
+          OR COALESCE(CAST(longform_count_60d AS INTEGER), 0) >= 2
+      )
     ORDER BY lead_score DESC, content_count_30d DESC
     """
     df = pd.read_sql_query(query, conn)
