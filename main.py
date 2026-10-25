@@ -346,26 +346,18 @@ def _template_ai_data(recent_title, creator_name):
     }
 
 def rebalance_priorities(db_path):
-    """Picks the top 5% of ACTUAL leads per platform based on score."""
     if not os.path.exists(db_path): return
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # 1. Reset all A's to B
     cursor.execute("UPDATE leads SET priority = 'B' WHERE priority = 'A'")
-    
-    # 2. Get distinct platforms
     platforms = cursor.execute("SELECT DISTINCT primary_platform FROM leads WHERE candidate_status='Qualified'").fetchall()
     
     total_a = 0
     for (plat,) in platforms:
-        # Count actual qualified leads for this platform
         count = cursor.execute("SELECT COUNT(*) FROM leads WHERE primary_platform = ? AND candidate_status='Qualified'", (plat,)).fetchone()[0]
-        
-        # Calculate 5% of actual leads (using round to prevent off-by-one errors)
         cap = max(5, round(count * 0.05))
         
-        # Upgrade the top N highest scoring leads for this specific platform
         query = """
             UPDATE leads
             SET priority = 'A'

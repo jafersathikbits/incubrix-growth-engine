@@ -55,50 +55,64 @@ TARGET_COUNTRIES = {
     "IE": 0.05, "NZ": 0.05, "SG": 0.05,
 }
 
+# 180+ High-Intent Keywords Targeting Monetized Creators
 SEARCH_QUERIES = [
-    # Base high-level
+    # Broad Business & Marketing
     "business", "startup", "entrepreneur", "marketing", "sales", "coaching", 
     "mindset", "finance", "investing", "crypto", "real estate", "ecommerce", 
-    "SaaS", "tech", "AI", "leadership", "career", "life coach", "health", 
-    "fitness", "wealth", "money", "passive income", "consulting", "agency", 
-    "freelance", "productivity", "networking", "management", "strategy",
+    "SaaS", "tech", "AI", "leadership", "career", "health", "fitness", 
+    "wealth", "money", "passive income", "consulting", "freelance", 
+    "productivity", "networking", "management", "strategy", "business growth",
     
-    # Expert-led & specific niches
-    "business coach", "podcast", "creator", "consultant", "masterclass",
-    "mentor", "digital marketing", "social media", "youtube", "content creation",
-    "business tips", "marketing strategy", "sales training", 
-    "coaching business", "life coaching", "executive coach", 
-    "financial advisor", "wealth management", "real estate agent",
-    "ecommerce business", "amazon fba", "dropshipping", 
-    "saas founder", "tech startup", "ai tools", 
-    "agency owner", "freelance business", "consulting business",
-    "lead generation", "personal branding", "business growth", 
-    "leadership podcast", "sales coaching", "agency growth", 
-    "freelance tips", "consulting tips", "mastermind podcast", 
-    "founder stories", "female entrepreneur", "b2b sales", 
-    "marketing tips", "personal development", "wealth building", 
-    "real estate investing", "course creator", "digital products", 
-    "online business", "solopreneur", "startup stories", 
-    "venture capital", "business strategy", "customer acquisition", 
-    "email marketing", "social media marketing", "business podcast",
+    # Expert-Led / Coaching / Consulting Niches
+    "business coach", "life coach", "executive coach", "health coach", 
+    "fitness coach", "career coach", "mindset coach", "leadership coach", 
+    "sales coach", "marketing coach", "business mentor", "life coaching", 
+    "executive coaching", "coaching business", "coaching tips", "consulting business",
+    "consulting tips", "freelance business", "freelance tips", "solopreneur",
     
-    # NEW: High-ticket, highly-monetized creators (Perfect for IncuBrix)
-    "video podcast", "youtube marketing", "podcast marketing",
-    "content strategy", "content repurposing", "video creator",
-    "online coach", "business mentor", "course business",
-    "membership podcast", "b2b marketing", "b2b founder",
-    "founder led sales", "personal brand", "creator business",
-    "podcast host", "youtube channel", "content marketing",
-    "brand building", "thought leadership", "keynote speaker",
-    "author podcast", "book launch", "startup marketing",
-    "b2b podcast", "business podcast host", "online course creator",
-    "youtube coach", "podcast coach", "video marketing"
+    # Monetization & High-Ticket Creators
+    "course creator", "online course", "digital products", "membership site",
+    "mastermind", "group coaching", "high ticket", "business strategy", 
+    "personal branding", "thought leadership", "keynote speaker", 
+    "author podcast", "book launch", "startup marketing", "founder stories",
+    
+    # B2B, SaaS & Tech Founders
+    "SaaS founder", "tech startup", "b2b marketing", "b2b sales", 
+    "b2b founder", "founder led sales", "startup founder", "startup stories", 
+    "venture capital", "product marketing", "growth marketing", "demand generation",
+    
+    # Content Creation & Repurposing (The Exact Problem IncuBrix Solves)
+    "content creation", "content marketing", "content strategy", "content repurposing",
+    "video marketing", "video creator", "video podcast", "podcast marketing", 
+    "podcast host", "podcast coaching", "youtube marketing", "youtube coach", 
+    "youtube growth", "social media marketing", "social media growth",
+    
+    # Finance & Real Estate (Highly Monetized)
+    "financial advisor", "wealth management", "financial coaching", "real estate agent",
+    "real estate investing", "real estate coaching", "mortgage broker", 
+    "insurance agent", "cpa marketing", "accounting firm", "bookkeeping",
+    
+    # E-commerce & Product Creators
+    "ecommerce business", "shopify store", "amazon fba", "dropshipping", 
+    "print on demand", "etsy seller", "digital marketing", "email marketing",
+    "funnel building", "lead generation", "affiliate marketing",
+    
+    # Specific Audiences (High Engagement)
+    "female entrepreneur", "mompreneur", "christian entrepreneur", 
+    "veteran entrepreneur", "young entrepreneur", "introvert entrepreneur",
+    "side hustle", "remote work", "digital nomad",
+    
+    # Misc High-Converting
+    "agency owner", "creator economy", "business tips", "marketing tips",
+    "sales training", "sales tips", "business podcast", "marketing podcast",
+    "sales podcast", "entrepreneur podcast", "business tips podcast"
 ]
 
 EXCLUDE_KEYWORDS = [
     "agency", "management", "fan", "clips", "compilation",
-    "network", "media", "productions", "radio",
-    "hindi", "urdu", "arabic", "espanol",
+    "network", "media", "productions", "radio", "news",
+    "hindi", "urdu", "arabic", "espanol", "spanish", "french", "german"
 ]
 
 def _warn_if_empty(name, value):

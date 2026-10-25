@@ -29,8 +29,7 @@ newsletter blurb never get made.
 IncuBrix takes one long episode and returns shorts, captions, a blog draft, and
 cross-post copy — in one pass. Would a 2-min walkthrough be useful?
 
-- Jafer Sathik B | Growth Engineer candidate, IncuBrix
-- {email} | {booking_link}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email} | {booking_link}
 Reply STOP to opt out.
 
 **Follow-up 1 (+3 days)**
@@ -45,7 +44,7 @@ captions, and the "what should this become" question in one workflow.
 
 Happy to show you a 2-min before/after using one of your own episodes.
 
-- Jafer | {email}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email}
 Reply STOP to opt out.
 
 **Follow-up 2 (+7 days)**
@@ -58,7 +57,7 @@ If this isn't a fit right now, no problem. I'll leave you with one thing:
 "{recent_title}" could easily become 8-12 Shorts + 1 LinkedIn post + 1 blog draft.
 If you ever want to see how, my inbox is open.
 
-- Jafer | {email}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email}
 Reply STOP to opt out.
 
 ---
@@ -80,8 +79,7 @@ buried in the middle. Most creators know this and still don't clip, because edit
 IncuBrix pulls those moments out, adds captions, and gives you the Shorts + a written
 post draft in one pass. Worth a 2-min look?
 
-- Jafer Sathik B | Growth Engineer candidate, IncuBrix
-- {email} | {booking_link}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email} | {booking_link}
 Reply STOP to opt out.
 
 **Follow-up 1 (+3 days)**
@@ -96,7 +94,7 @@ repurposing is bigger than you think.
 
 Happy to send a 2-min clip showing it on your own video.
 
-- Jafer | {email}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email}
 Reply STOP to opt out.
 
 **Follow-up 2 (+7 days)**
@@ -109,7 +107,7 @@ If repurposing is on your roadmap this quarter, IncuBrix turns one video into a
 Shorts pack + captions + a written post draft automatically. If not, no worries —
 thanks for the work you put out.
 
-- Jafer | {email}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email}
 Reply STOP to opt out.
 
 ---
@@ -132,8 +130,7 @@ the funnel full between launches.
 IncuBrix solves that: one long-form video in, a week of cross-posted content out.
 Would a 2-min walkthrough be useful?
 
-- Jafer Sathik B | Growth Engineer candidate, IncuBrix
-- {email} | {booking_link}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email} | {booking_link}
 Reply STOP to opt out.
 
 **Follow-up 1 (+3 days)**
@@ -149,7 +146,7 @@ pieces that would have driven those calls never happened.
 IncuBrix turns one video into 8-12 pieces across channels. Happy to show it on
 your content.
 
-- Jafer | {email}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email}
 Reply STOP to opt out.
 
 **Follow-up 2 (+7 days)**
@@ -161,5 +158,5 @@ Hi {first_name}, last note from me.
 If repurposing is on your list, IncuBrix is built for exactly this. If it's not,
 totally fine — the content you're publishing is good and worth the listen.
 
-- Jafer | {email}
+- Jafer Sathik B | Growth Engineer candidate, IncuBrix | {email}
 Reply STOP to opt out.
