@@ -1,0 +1,145 @@
+2026-10-25 08:54:17,587 | INFO | === SEED TEST START lead_id=TEST-03B6FC47 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 08:54:17,587 | INFO | Follow-up schedule: {1: '2026-10-25T03:24:17.587396+00:00', 2: '2026-10-28T03:24:17.587396+00:00', 3: '2026-11-01T03:24:17.587396+00:00'}
+2026-10-25 08:54:17,587 | ERROR | SEED_EMAIL_TO not set in .env
+2026-10-25 08:54:17,588 | ERROR | SEED_EMAIL_TO not set in .env
+2026-10-25 08:54:17,588 | ERROR | SEED_EMAIL_TO not set in .env
+2026-10-25 08:54:17,588 | ERROR | SEED_LINKEDIN_HANDLE not set in .env
+2026-10-25 08:54:17,588 | ERROR | SEED_LINKEDIN_HANDLE not set in .env
+2026-10-25 08:54:17,589 | ERROR | SEED_LINKEDIN_HANDLE not set in .env
+2026-10-25 08:54:17,589 | ERROR | SEED_INSTAGRAM_HANDLE not set in .env
+2026-10-25 08:54:17,589 | ERROR | SEED_INSTAGRAM_HANDLE not set in .env
+2026-10-25 08:54:17,589 | ERROR | SEED_INSTAGRAM_HANDLE not set in .env
+2026-10-25 08:54:17,589 | INFO | === SEED TEST END lead_id=TEST-03B6FC47 ===
+2026-10-25 08:59:19,660 | INFO | === SEED TEST START lead_id=TEST-25EA85B1 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 08:59:19,660 | INFO | Follow-up schedule: {1: '2026-10-25T03:29:19.660546+00:00', 2: '2026-10-28T03:29:19.660546+00:00', 3: '2026-11-01T03:29:19.660546+00:00'}
+2026-10-25 08:59:23,964 | INFO | email step 1 -> jafersathikbits@gmail.com: OK Test email sent successfully!
+2026-10-25 08:59:49,592 | INFO | email step 2 -> jafersathikbits@gmail.com: OK Test email sent successfully!
+2026-10-25 08:59:53,309 | INFO | email step 3 -> jafersathikbits@gmail.com: OK Test email sent successfully!
+2026-10-25 08:59:53,337 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 08:59:53,339 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 08:59:53,340 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 08:59:53,341 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 08:59:53,342 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 08:59:53,343 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 08:59:53,343 | INFO | === SEED TEST END lead_id=TEST-25EA85B1 ===
+2026-10-25 09:12:51,532 | INFO | === SEED TEST START lead_id=TEST-F6E341AD ===
+2026-10-25 09:12:51,533 | INFO | Follow-up schedule: {1: '2026-10-25T03:42:51.532864+00:00', 2: '2026-10-28T03:42:51.532864+00:00', 3: '2026-11-01T03:42:51.532864+00:00'}
+2026-10-25 09:13:16,666 | INFO | email step 1 -> jafersathikbits@gmail.com: OK Test email sent successfully!
+2026-10-25 09:13:20,567 | INFO | email step 2 -> jafersathikbits@gmail.com: OK Test email sent successfully!
+2026-10-25 09:13:24,361 | INFO | email step 3 -> jafersathikbits@gmail.com: OK Test email sent successfully!
+2026-10-25 09:13:24,361 | INFO | === SEED TEST END lead_id=TEST-F6E341AD ===
+2026-10-25 09:15:16,999 | INFO | === SEED TEST START lead_id=TEST-2A23D5F7 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:15:20,838 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:15:45,949 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:15:49,924 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:15:49,962 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:15:49,963 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:15:49,964 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:15:49,984 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:15:49,985 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:15:49,987 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:15:49,988 | INFO | === SEED TEST END lead_id=TEST-2A23D5F7 ===
+2026-10-25 09:23:24,985 | INFO | === SEED TEST START lead_id=TEST-D141085A channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:23:29,066 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:23:32,806 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:23:58,267 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:23:58,269 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:23:58,270 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:23:58,271 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:23:58,272 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:23:58,274 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:23:58,274 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:23:58,275 | INFO | === SEED TEST END lead_id=TEST-D141085A ===
+2026-10-25 09:25:00,458 | INFO | === SEED TEST START lead_id=TEST-75807849 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:25:04,195 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:25:08,242 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:25:33,316 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:25:33,318 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:25:33,318 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:25:33,319 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:25:33,320 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:25:33,321 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:25:33,322 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:25:33,322 | INFO | === SEED TEST END lead_id=TEST-75807849 ===
+2026-10-25 09:27:24,075 | INFO | === SEED TEST START lead_id=TEST-2535E63B channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:27:27,953 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:27:53,200 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:28:18,210 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:28:18,212 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:28:18,213 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:28:18,214 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:28:18,217 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:28:18,218 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:28:18,219 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:28:18,219 | INFO | === SEED TEST END lead_id=TEST-2535E63B ===
+2026-10-25 09:32:35,844 | INFO | === SEED TEST START lead_id=TEST-7CA2BCC2 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:33:01,447 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:33:27,891 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:33:52,986 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:33:52,988 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:33:52,989 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:33:52,990 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:33:52,992 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:33:52,993 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:33:52,994 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:33:52,994 | INFO | === SEED TEST END lead_id=TEST-7CA2BCC2 ===
+2026-10-25 09:37:30,900 | INFO | === SEED TEST START lead_id=TEST-EDDD0216 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:37:30,900 | INFO | Connecting to SMTP server (this takes ~25s once)...
+2026-10-25 09:37:35,965 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:37:37,851 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:37:39,878 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:37:40,166 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:37:40,168 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:37:40,170 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:37:40,173 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:37:40,176 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:37:40,181 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:37:40,182 | INFO | === SEED TEST END lead_id=TEST-EDDD0216 ===
+2026-10-25 09:42:26,244 | INFO | === SEED TEST START lead_id=TEST-A2E4EA97 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:42:26,244 | INFO | Connecting to SMTP server (this takes ~25s once)...
+2026-10-25 09:42:50,860 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:42:53,868 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:42:55,598 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:42:55,877 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:42:55,879 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:42:55,881 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:42:55,884 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:42:55,891 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:42:55,893 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:42:55,894 | INFO | === SEED TEST END lead_id=TEST-A2E4EA97 ===
+2026-10-25 09:49:49,139 | INFO | === SEED TEST START lead_id=TEST-A8E7C4E8 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:49:49,139 | INFO | Connecting to SMTP server...
+2026-10-25 09:49:52,896 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:49:54,814 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:49:56,615 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:49:56,891 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:49:56,894 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:49:56,895 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:49:56,897 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:49:56,898 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:49:56,898 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:49:56,899 | INFO | === SEED TEST END lead_id=TEST-A8E7C4E8 ===
+2026-10-25 09:53:21,912 | INFO | === SEED TEST START lead_id=TEST-E482AF22 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:53:21,912 | INFO | Connecting to SMTP server...
+2026-10-25 09:53:46,501 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:53:48,292 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:53:50,014 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:53:50,294 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:53:50,295 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:53:50,297 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:53:50,299 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:53:50,301 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:53:50,304 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:53:50,305 | INFO | === SEED TEST END lead_id=TEST-E482AF22 ===
+2026-10-25 09:55:30,482 | INFO | === SEED TEST START lead_id=TEST-4EF73E01 channels=['email', 'linkedin', 'instagram'] ===
+2026-10-25 09:55:30,483 | INFO | Connecting to SMTP server...
+2026-10-25 09:55:34,248 | INFO | email step 1 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:55:35,955 | INFO | email step 2 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:55:37,705 | INFO | email step 3 -> jafersathikbits@gmail.com: OK
+2026-10-25 09:55:37,986 | INFO | linkedin step 1 queued for @jafersathikbits
+2026-10-25 09:55:37,987 | INFO | linkedin step 2 queued for @jafersathikbits
+2026-10-25 09:55:37,989 | INFO | linkedin step 3 queued for @jafersathikbits
+2026-10-25 09:55:37,993 | INFO | instagram step 1 queued for @jafersathikbits
+2026-10-25 09:55:37,995 | INFO | instagram step 2 queued for @jafersathikbits
+2026-10-25 09:55:37,998 | INFO | instagram step 3 queued for @jafersathikbits
+2026-10-25 09:55:38,000 | INFO | === SEED TEST END lead_id=TEST-4EF73E01 ===
